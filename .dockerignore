@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+*.db
+.pytest_cache

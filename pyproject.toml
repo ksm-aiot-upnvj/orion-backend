@@ -1,0 +1,39 @@
+[project]
+name = "orion-backend"
+version = "1.0.0"
+description = "Orion - KSM AIoT Management & Portal Backend API"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.17.2",
+    "asyncpg>=0.31.0",
+    "bcrypt>=4.2.0",
+    "fastapi[standard]>=0.128.0",
+    "pydantic[email]>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyjwt>=2.10.1",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0.45",
+    "uvicorn[standard]>=0.30.0",
+    "openpyxl>=3.1.5",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.10",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "httpx>=0.28.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+ignore = ["B008", "DTZ005"]
