@@ -38,8 +38,16 @@ class RegistrationService:
 
         stmt = text(
             """
-            INSERT INTO registrations (id, student_id, full_name, program_of_study, email, contact_info, intake_period, interest_track, motivation, photo, status, submit_date)
-            VALUES (:id, :student_id, :full_name, :program_of_study, :email, :contact_info, :intake_period, :interest_track, :motivation, :photo, 'PENDING', :submit_date)
+            INSERT INTO registrations (
+                id, student_id, full_name, program_of_study, email, contact_info,
+                intake_period, interest_track, motivation, photo, status, submit_date,
+                created_at, updated_at
+            )
+            VALUES (
+                :id, :student_id, :full_name, :program_of_study, :email, :contact_info,
+                :intake_period, :interest_track, :motivation, :photo, 'PENDING', :submit_date,
+                NOW(), NOW()
+            )
             RETURNING *
             """
         )
@@ -115,8 +123,8 @@ class RegistrationService:
             division = "Akademik & Riset" if "Artificial" in reg["interest_track"] or "Robotics" in reg["interest_track"] else "Pengembangan SDM"
             insert_m_stmt = text(
                 """
-                INSERT INTO members (id, member_id, student_id, full_name, program_of_study, email, contact_info, division, role, intake_period, interest_track, avatar, status, join_date)
-                VALUES (:id, :member_id, :student_id, :full_name, :program_of_study, :email, :contact_info, :division, :role, :intake_period, :interest_track, :avatar, 'Aktif (Anggota Baru)', :join_date)
+                INSERT INTO members (id, member_id, student_id, full_name, program_of_study, email, contact_info, division, role, intake_period, interest_track, avatar, status, join_date, created_at)
+                VALUES (:id, :member_id, :student_id, :full_name, :program_of_study, :email, :contact_info, :division, :role, :intake_period, :interest_track, :avatar, 'Aktif (Anggota Baru)', :join_date, NOW())
                 """
             )
             await self.session.execute(insert_m_stmt, {
