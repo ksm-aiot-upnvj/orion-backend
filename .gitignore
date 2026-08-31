@@ -123,8 +123,20 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments & Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Local Storage & Uploads
+uploads/*
+!uploads/.gitkeep
+!uploads/avatars/.gitkeep
+
 .venv
 env/
 venv/

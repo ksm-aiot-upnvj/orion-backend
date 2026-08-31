@@ -1,7 +1,12 @@
-from pathlib import Path
+import logging
+import os
 import tomllib
+from pathlib import Path
+
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("orion.config")
 
 
 def get_pyproject_version() -> str:
@@ -12,8 +17,8 @@ def get_pyproject_version() -> str:
             with open(pyproject_path, "rb") as f:
                 data = tomllib.load(f)
                 return data.get("project", {}).get("version", "1.0.0")
-    except Exception:
-        pass
+    except (OSError, tomllib.TOMLDecodeError, KeyError):
+        return "1.0.0"
     return "1.0.0"
 
 
@@ -38,15 +43,25 @@ class Settings(BaseSettings):
 
     RAW_DATABASE_URL: str | None = Field(default=None, validation_alias="DATABASE_URL")
 
-    SECRET_KEY: str = Field(default="orion-secret-key-ksm-aiot-upnvj-2026-supersecure", validation_alias="JWT_SECRET")
-    ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60 * 24 * 7, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    UPLOAD_DIR: str = Field(default="uploads", validation_alias="UPLOAD_DIR")
+    MAX_UPLOAD_SIZE: int = Field(default=2 * 1024 * 1024, validation_alias="MAX_UPLOAD_SIZE")  # 2MB
 
+    # Security & Tokens: Short-lived access tokens (30 mins) + 7 days refresh
+    SECRET_KEY: str = Field(
+        default="orion-secret-key-ksm-aiot-upnvj-2026-supersecure-enterprise-jwt",
+        validation_alias="JWT_SECRET",
+    )
+    ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, validation_alias="REFRESH_TOKEN_EXPIRE_DAYS")
+
+    # Allowed CORS Origins
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:80",
-        "*"
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
     ]
     DEBUG: bool = Field(default=True, validation_alias="DEBUG")
     LOG_LEVEL: str = Field(default="INFO", validation_alias="LOG_LEVEL")
@@ -89,5 +104,15 @@ class Settings(BaseSettings):
     def get_database_url(self) -> str:
         return self.DATABASE_URL
 
+    def get_allowed_origins(self) -> list[str]:
+        """Return restrictive CORS origins for production, or allow configured for dev."""
+        if self.ENVIRONMENT.lower() == "production":
+            # In production, filter out wildcard
+            return [o for o in self.CORS_ORIGINS if o != "*"]
+        return self.CORS_ORIGINS
+
 
 settings = Settings()
+
+if settings.ENVIRONMENT.lower() == "production" and "supersecure" in settings.SECRET_KEY:
+    logger.warning("PERINGATAN KEAMANAN: SECRET_KEY masih menggunakan default nilai development pada production!")

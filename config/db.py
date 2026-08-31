@@ -1,8 +1,10 @@
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import NullPool
 
 from config.config import settings
 
@@ -19,13 +21,19 @@ Base = declarative_base(metadata=NAMING)
 
 db_url = settings.get_database_url()
 
-engine = create_async_engine(
-    db_url,
-    echo=settings.DEBUG,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-)
+is_testing = bool(os.getenv("PYTEST_CURRENT_TEST")) or settings.ENVIRONMENT == "test"
+
+engine_kwargs = {"echo": False}
+if is_testing:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs.update({
+        "pool_pre_ping": True,
+        "pool_size": 10,
+        "max_overflow": 20,
+    })
+
+engine = create_async_engine(db_url, **engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -34,6 +42,7 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
 
 async def get_db() -> AsyncGenerator[AsyncSession]:
     """FastAPI dependency for obtaining async SQLAlchemy session."""
