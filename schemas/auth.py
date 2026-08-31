@@ -15,9 +15,18 @@ class UserOut(BaseModel):
     full_name: str
     email: str
     role: str
-    division: str
+    division: str | None = None
     avatar: str | None = None
     is_active: bool
+
+class ProfileUpdate(BaseModel):
+    full_name: str | None = None
+    email: str | None = None
+    avatar: str | None = None
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 class LoginResponse(BaseModel):
     access_token: str
