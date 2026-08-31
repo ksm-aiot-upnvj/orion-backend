@@ -2,11 +2,13 @@ import argparse
 import asyncio
 from pathlib import Path
 from typing import Any
+
 import openpyxl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import AsyncSessionLocal
+from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
 from utils.security import hash_password
 from utils.uuid_utils import generate_uuid7
 
@@ -24,8 +26,7 @@ def clean_int(val: Any) -> int | None:
     if val is None:
         return None
     s = str(val).strip()
-    if s.endswith('.0'):
-        s = s[:-2]
+    s = s.removesuffix('.0')
     try:
         return int(s)
     except ValueError:
@@ -61,28 +62,72 @@ class ExcelMemberImporter:
                 continue
 
             # Standardize division
-            raw_division = clean_val(row_dict.get("Divisi")) or "BPH"
-            division = raw_division
-            if "Akademik" in raw_division or "Riset" in raw_division:
-                division = "Akademik & Riset"
-            elif "Sumber Daya" in raw_division or "PSDM" in raw_division:
-                division = "Pengembangan SDM"
-            elif "Masyarakat" in raw_division or "Multimedia" in raw_division or "Humas" in raw_division:
-                division = "Humas & Multimedia"
-            elif "BPH" in raw_division or not raw_division:
-                division = "BPH"
+            raw_division = clean_val(row_dict.get("Divisi"))
+            division = None
+            if raw_division:
+                if "Akademik" in raw_division or "Riset" in raw_division:
+                    division = Division.AKADEMIK_RISET.value
+                elif "Sumber Daya" in raw_division or "PSDM" in raw_division or "Pengembangan" in raw_division:
+                    division = Division.PSDM.value
+                elif "Masyarakat" in raw_division or "Multimedia" in raw_division or "Humas" in raw_division:
+                    division = Division.HUMAS_MULTIMEDIA.value
+                elif "BPH" in raw_division:
+                    division = Division.BPH.value
 
             # Standardize role / jabatan
-            role = clean_val(row_dict.get("Jabatan")) or "Anggota"
+            raw_role = clean_val(row_dict.get("Jabatan")) or "Anggota"
+            role = MemberRole.ANGGOTA.value
+            if "Ketua" in raw_role and "Wakil" not in raw_role:
+                role = MemberRole.KETUA.value
+            elif "Wakil" in raw_role:
+                role = MemberRole.WAKIL_KETUA.value
+            elif "Kepala" in raw_role or "Kadiv" in raw_role or "Koordinator" in raw_role:
+                role = MemberRole.KEPALA_DIVISI.value
+            elif "Staff" in raw_role or "Staf" in raw_role:
+                role = MemberRole.STAFF.value
+            elif "Anggota" in raw_role:
+                role = MemberRole.ANGGOTA.value
+
+            # Standardize prodi
+            raw_prodi = clean_val(row_dict.get("Program Studi")) or ""
+            if "Sains Data" in raw_prodi or "10513" in student_id:
+                prodi = StudyProgram.S1_SAINS_DATA.value
+            elif "D3" in raw_prodi or "00511" in student_id:
+                prodi = StudyProgram.D3_SISTEM_INFORMASI.value
+            elif "Sistem Informasi" in raw_prodi or "10512" in student_id:
+                prodi = StudyProgram.S1_SISTEM_INFORMASI.value
+            else:
+                prodi = StudyProgram.S1_INFORMATIKA.value
+
+            # Standardize status
+            raw_status = clean_val(row_dict.get("Status Anggota")) or "Aktif"
+            if "Alumni" in raw_status:
+                status = MemberStatus.ALUMNI.value
+            elif "Tidak" in raw_status or "Nonaktif" in raw_status:
+                status = MemberStatus.TIDAK_AKTIF.value
+            else:
+                status = MemberStatus.AKTIF.value
 
             # Standardize intaking period
             intake_period = clean_val(row_dict.get("Tahun Masuk KSM")) or "2026"
+
+            # Standardize research fields / interest tracks
+            raw_interest = clean_val(row_dict.get("Bidang apa yang ingin kamu eksplorasi lebih jauh di KSM ini? ")) or clean_val(row_dict.get("Keahlian/Fokus utama kamu saat ini? ")) or ""
+            interest_tracks = []
+            if "IoT" in raw_interest or "Embedded" in raw_interest or "Hardware" in raw_interest or "Robot" in raw_interest:
+                interest_tracks.append(ResearchField.IOT_EMBEDDED.value)
+            if "AI" in raw_interest or "Artificial" in raw_interest or "Machine Learning" in raw_interest:
+                interest_tracks.append(ResearchField.AI.value)
+            if "Software" in raw_interest or "Web" in raw_interest or "Cloud" in raw_interest or "Backend" in raw_interest or "Frontend" in raw_interest:
+                interest_tracks.append(ResearchField.SOFTWARE_ENGINEER_CLOUD.value)
+            if not interest_tracks:
+                interest_tracks = [ResearchField.AI.value]
 
             member_record = {
                 "sequence_index": idx,
                 "student_id": student_id,
                 "full_name": full_name,
-                "program_of_study": clean_val(row_dict.get("Program Studi")) or "-",
+                "program_of_study": prodi,
                 "semester": clean_int(row_dict.get("Semester")),
                 "email": clean_val(row_dict.get("Email Pribadi")) or f"{student_id}@mahasiswa.upnvj.ac.id",
                 "contact_info": clean_val(row_dict.get("No WhatsApp")) or clean_val(row_dict.get("No WhatsApp ")),
@@ -90,8 +135,7 @@ class ExcelMemberImporter:
                 "division": division,
                 "role": role,
                 "intake_period": intake_period,
-                "interest_track": clean_val(row_dict.get("Bidang apa yang ingin kamu eksplorasi lebih jauh di KSM ini? "))
-                                 or clean_val(row_dict.get("Keahlian/Fokus utama kamu saat ini? ")),
+                "interest_track": interest_tracks,
                 "focus_expertise": clean_val(row_dict.get("Keahlian/Fokus utama kamu saat ini? ")),
                 "exploration_field": clean_val(row_dict.get("Bidang apa yang ingin kamu eksplorasi lebih jauh di KSM ini? ")),
                 "field_reason": clean_val(row_dict.get("Alasan memilih bidang tersebut  ")),
@@ -105,12 +149,13 @@ class ExcelMemberImporter:
                 "other_activities": clean_val(row_dict.get("Kesibukan lain")),
                 "discord_id": clean_val(row_dict.get("Akun Discord (ID)")),
                 "registration_timestamp": clean_val(row_dict.get("Timestamp")),
-                "status": clean_val(row_dict.get("Status Anggota")) or "Aktif",
+                "status": status,
                 "join_date": "15/09/2023" if "2023" in intake_period else "20/09/2024" if "2024" in intake_period else "15/01/2026",
             }
             members.append(member_record)
 
         return members
+
 
     @staticmethod
     async def import_to_database(db: AsyncSession, members: list[dict], default_password: str = "aiotupnvj2026") -> dict:
@@ -131,11 +176,22 @@ class ExcelMemberImporter:
             if student_id in existing_by_student:
                 member_id = existing_by_student[student_id]
             else:
-                candidate_id = f"AIOT-2026-{str(idx).zfill(3)}"
+                intake_raw = str(m.get("intake_period") or "").strip()
+                student_raw = str(student_id).strip()
+                if intake_raw.isdigit() and len(intake_raw) == 4:
+                    year = intake_raw
+                elif intake_raw.isdigit() and len(intake_raw) == 2:
+                    year = f"20{intake_raw}"
+                elif len(student_raw) >= 2 and student_raw[:2].isdigit():
+                    year = f"20{student_raw[:2]}"
+                else:
+                    year = "2026"
+
+                candidate_id = f"AIOT-{year}-{str(idx).zfill(3)}"
                 counter = idx
                 while candidate_id in used_member_ids:
                     counter += 1
-                    candidate_id = f"AIOT-2026-{str(counter).zfill(3)}"
+                    candidate_id = f"AIOT-{year}-{str(counter).zfill(3)}"
                 member_id = candidate_id
                 used_member_ids.add(member_id)
 

@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import UUID
 
 from config.db import Base
+from models.enums import Division
 from utils.uuid_utils import generate_uuid7
 
 
@@ -16,7 +18,11 @@ class User(Base):
     email = Column(String(150), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(50), default="PENGURUS", nullable=False)  # SUPERADMIN, ADMIN_BPH, PENGURUS
-    division = Column(String(100), nullable=False)  # BPH, Akademik & Riset, Pengembangan SDM, Humas & Multimedia
-    avatar = Column(String(500), nullable=True)
+    division = Column(
+        PgEnum(Division, name="division_enum", values_callable=lambda obj: [e.value for e in obj], create_type=False),
+        nullable=True,
+    )
+    avatar = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+

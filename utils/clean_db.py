@@ -1,6 +1,8 @@
 import asyncio
-from config.db import AsyncSessionLocal
+
 from sqlalchemy import text
+
+from config.db import AsyncSessionLocal
 
 # The 11 dummy student_ids that were seeded prior to the official Excel ingestion
 DUMMY_STUDENT_IDS = [
