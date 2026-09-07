@@ -30,7 +30,7 @@ done
 
 echo "Database is ready."
 echo "Applying database migrations with Alembic..."
-alembic upgrade head
+python -m alembic upgrade head
 
 echo "Starting Orion Backend application..."
 exec "$@"
