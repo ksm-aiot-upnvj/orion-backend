@@ -28,5 +28,9 @@ do
   sleep 2
 done
 
-echo "Database is ready. Starting Orion Backend application..."
+echo "Database is ready."
+echo "Applying database migrations with Alembic..."
+alembic upgrade head
+
+echo "Starting Orion Backend application..."
 exec "$@"
