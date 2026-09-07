@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, ProfileUpdate, UserOut
 from services.audit_log_service import log_audit_event
 from utils.sanitizer import sanitize_text
-from utils.security import create_access_token, create_refresh_token, hash_password, verify_password
+from utils.security import create_access_token, hash_password, verify_password
 
 
 class AuthService:
@@ -16,24 +16,34 @@ class AuthService:
         self.session = session
 
     async def get_user_by_identifier(self, identifier: str) -> dict | None:
-        """Fetch user by NIM (student_id) or email using raw parameterized SQL."""
+        """Fetch user by NIM (student_id) or email using raw parameterized SQL with LEFT JOIN members."""
         stmt = text(
             """
-            SELECT id, student_id, full_name, email, hashed_password, role, division, avatar, is_active, created_at
-            FROM users
-            WHERE (student_id = :identifier OR email = :identifier) AND is_active = true
+            SELECT u.id, u.student_id, u.full_name, u.email, u.hashed_password,
+                   COALESCE(m.role::text, u.role) AS role,
+                   COALESCE(m.division::text, u.division::text) AS division,
+                   COALESCE(u.member_id, m.id) AS member_id,
+                   u.avatar, u.is_superadmin, u.is_active, u.created_at
+            FROM users u
+            LEFT JOIN members m ON u.student_id = m.student_id
+            WHERE (u.student_id = :identifier OR u.email = :identifier) AND u.is_active = true
             """
         )
         result = await self.session.execute(stmt, {"identifier": identifier})
         return result.mappings().first()
 
     async def get_user_by_id(self, user_id: uuid.UUID) -> dict | None:
-        """Fetch user by UUID using raw parameterized SQL."""
+        """Fetch user by UUID using raw parameterized SQL with LEFT JOIN members."""
         stmt = text(
             """
-            SELECT id, student_id, full_name, email, hashed_password, role, division, avatar, is_active, created_at
-            FROM users
-            WHERE id = :user_id AND is_active = true
+            SELECT u.id, u.student_id, u.full_name, u.email, u.hashed_password,
+                   COALESCE(m.role::text, u.role) AS role,
+                   COALESCE(m.division::text, u.division::text) AS division,
+                   COALESCE(u.member_id, m.id) AS member_id,
+                   u.avatar, u.is_superadmin, u.is_active, u.created_at
+            FROM users u
+            LEFT JOIN members m ON u.student_id = m.student_id
+            WHERE u.id = :user_id AND u.is_active = true
             """
         )
         result = await self.session.execute(stmt, {"user_id": user_id})
@@ -73,6 +83,8 @@ class AuthService:
                 "sub": str(user["id"]),
                 "student_id": user["student_id"],
                 "role": user["role"],
+                "division": user.get("division"),
+                "is_superadmin": user.get("is_superadmin", False),
                 "name": user["full_name"],
             }
         )
@@ -122,12 +134,11 @@ class AuthService:
             UPDATE users
             SET {', '.join(updates)}
             WHERE id = :user_id
-            RETURNING id, student_id, full_name, email, role, division, avatar, is_active, created_at
             """
         )
-        result = await self.session.execute(stmt, params)
+        await self.session.execute(stmt, params)
         await self.session.commit()
-        updated_user = result.mappings().first()
+        updated_user = await self.get_user_by_id(user_id)
         if not updated_user:
             raise HTTPException(status_code=404, detail="User tidak ditemukan")
 

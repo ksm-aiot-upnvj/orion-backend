@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -13,16 +13,18 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid7)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="SET NULL"), nullable=True, index=True)
     student_id = Column(String(20), unique=True, index=True, nullable=False)  # NIM
     full_name = Column(String(150), nullable=False)
     email = Column(String(150), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    role = Column(String(50), default="PENGURUS", nullable=False)  # SUPERADMIN, ADMIN_BPH, PENGURUS
+    role = Column(String(50), default="PENGURUS", nullable=False)  # SUPERADMIN, ANGGOTA, dll.
     division = Column(
         PgEnum(Division, name="division_enum", values_callable=lambda obj: [e.value for e in obj], create_type=False),
         nullable=True,
     )
     avatar = Column(String(255), nullable=True)
+    is_superadmin = Column(Boolean, default=False, server_default=text("false"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 

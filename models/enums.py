@@ -11,6 +11,8 @@ class Division(StrEnum):
 class MemberRole(StrEnum):
     KETUA = "Ketua"
     WAKIL_KETUA = "Wakil Ketua"
+    SEKRETARIS = "Sekretaris"
+    BENDAHARA = "Bendahara"
     KEPALA_DIVISI = "Kepala Divisi"
     STAFF = "Staff"
     ANGGOTA = "Anggota"

@@ -62,6 +62,25 @@ class MemberService:
         row = result.mappings().first()
         return row["total"] if row else 0
 
+    async def get_public_stats(self) -> dict:
+        """Count total, active, and alumni members using raw SQL for public statistics."""
+        stmt = text(
+            """
+            SELECT 
+                COUNT(*) AS total_members,
+                COUNT(*) FILTER (WHERE status = 'Aktif') AS active_members,
+                COUNT(*) FILTER (WHERE status = 'Alumni') AS alumni_count
+            FROM members
+            """
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        return {
+            "total_members": row["total_members"] if row else 0,
+            "active_members": row["active_members"] if row else 0,
+            "alumni_count": row["alumni_count"] if row else 0,
+        }
+
     async def create_member(self, member_data: dict, actor: dict | None = None) -> dict:
         """Insert or update member using raw SQL RETURNING * with sanitization and audit logging."""
         # Sanitize text fields to prevent injection
@@ -70,7 +89,6 @@ class MemberService:
         m_id = member_data.get("id", generate_uuid7())
         member_id = member_data.get("member_id")
         if not member_id:
-            count = await self.count_members()
             intake_raw = str(member_data.get("intake_period") or "").strip()
             student_id_raw = str(member_data.get("student_id") or "").strip()
             if intake_raw.isdigit() and len(intake_raw) == 4:
@@ -81,7 +99,19 @@ class MemberService:
                 year = f"20{student_id_raw[:2]}"
             else:
                 year = str(datetime.now().year)
-            member_id = f"AIOT-{year}-{str(count + 1).zfill(3)}"
+
+            stmt = text("SELECT member_id FROM members WHERE member_id LIKE :prefix")
+            res = await self.session.execute(stmt, {"prefix": f"AIOT-{year}-%"})
+            rows = res.scalars().all()
+            max_num = 0
+            for mid in rows:
+                try:
+                    num = int(str(mid).split("-")[-1])
+                    if num > max_num:
+                        max_num = num
+                except Exception:
+                    pass
+            member_id = f"AIOT-{year}-{str(max_num + 1).zfill(3)}"
 
         # Normalize enum/array values
         def get_enum_val(v, default_val):

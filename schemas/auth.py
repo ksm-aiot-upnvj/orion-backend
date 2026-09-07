@@ -11,12 +11,14 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    member_id: uuid.UUID | None = None
     student_id: str
     full_name: str
     email: str
     role: str
     division: str | None = None
     avatar: str | None = None
+    is_superadmin: bool = False
     is_active: bool
 
 class ProfileUpdate(BaseModel):

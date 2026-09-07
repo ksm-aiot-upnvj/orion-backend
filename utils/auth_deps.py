@@ -87,26 +87,137 @@ async def get_optional_current_user(
         return None
 
 
+async def require_pengurus(current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Enforce that authenticated user is an active Pengurus / BPH / Superadmin.
+    Anggota Umum (role == 'Anggota') is completely denied access (HTTP 403 Forbidden).
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+    if role.lower() == "anggota" or not role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses Ditolak: Modul ini hanya dapat diakses oleh Pengurus KSM AIoT.",
+        )
+    return current_user
+
+
+async def can_manage_selection(current_user: dict = Depends(require_pengurus)) -> dict:
+    """
+    Write authorization for Candidate Selection (Intake config, Approve, Reject, Delete).
+    Allowed: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
+    Humas Multimedia (PDD) and other divisions are Read-Only (HTTP 403).
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+    division = (current_user.get("division") or "").strip()
+
+    if role in ("Ketua", "Wakil Ketua") or division == "PSDM":
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Akses Ditolak: Modifikasi seleksi hanya diizinkan untuk Divisi PSDM, Ketua, atau Wakil Ketua. Hak akses Anda: Read-Only.",
+    )
+
+
+async def can_manage_members(current_user: dict = Depends(require_pengurus)) -> dict:
+    """
+    Write authorization for Member directory (Create, Update, Delete, Import Excel, Anonymize).
+    Allowed: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+    division = (current_user.get("division") or "").strip()
+
+    if role in ("Ketua", "Wakil Ketua") or division == "PSDM":
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Akses Ditolak: Pengelolaan anggota hanya diizinkan untuk Divisi PSDM, Ketua, atau Wakil Ketua. Hak akses Anda: Read-Only.",
+    )
+
+
+async def can_manage_inventory(current_user: dict = Depends(require_pengurus)) -> dict:
+    """
+    Write authorization for Hardware Inventory.
+    Allowed: Superadmin, Ketua, Wakil Ketua, or Akademik Riset Division.
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+    division = (current_user.get("division") or "").strip()
+
+    if role in ("Ketua", "Wakil Ketua") or division == "Akademik Riset":
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Akses Ditolak: Pengelolaan inventaris hanya diizinkan untuk Divisi Akademik & Riset, Ketua, atau Wakil Ketua. Hak akses Anda: Read-Only.",
+    )
+
+
+async def can_manage_finance(current_user: dict = Depends(require_pengurus)) -> dict:
+    """
+    Write authorization for Kas & Keuangan.
+    Allowed: Superadmin, Ketua, Wakil Ketua, or Bendahara.
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+
+    if role in ("Ketua", "Wakil Ketua", "Bendahara"):
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Akses Ditolak: Pengelolaan kas keuangan hanya diizinkan untuk Bendahara, Ketua, atau Wakil Ketua. Hak akses Anda: Read-Only.",
+    )
+
+
+async def can_manage_archive(current_user: dict = Depends(require_pengurus)) -> dict:
+    """
+    Write authorization for Arsip & Surat Resmi.
+    Allowed: Superadmin, Ketua, Wakil Ketua, or Sekretaris.
+    """
+    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+        return current_user
+
+    role = (current_user.get("role") or "").strip()
+
+    if role in ("Ketua", "Wakil Ketua", "Sekretaris"):
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Akses Ditolak: Pengelolaan arsip surat hanya diizinkan untuk Sekretaris, Ketua, atau Wakil Ketua. Hak akses Anda: Read-Only.",
+    )
+
+
 def require_roles(*allowed_roles: str) -> Callable:
     """
-    Backend-Enforced RBAC Dependency (Reusable across all ORION modules).
-    
-    Usage in route:
-        @router.delete("/members/{id}")
-        async def delete_member(
-            id: str,
-            current_user: dict = Depends(require_roles("SUPERADMIN", "ADMIN_BPH"))
-        ):
-            ...
+    Backend-Enforced RBAC Dependency with support for Member roles and System roles.
     """
-    # Normalize roles to uppercase
     normalized_roles = {r.upper() for r in allowed_roles}
 
-    async def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
+    async def role_checker(current_user: dict = Depends(require_pengurus)) -> dict:
         user_role = (current_user.get("role") or "").upper()
+        is_super = current_user.get("is_superadmin") or user_role == SystemRole.SUPERADMIN
 
-        # SUPERADMIN always has global authorization
-        if user_role == SystemRole.SUPERADMIN or user_role in normalized_roles:
+        if is_super or user_role in normalized_roles:
+            return current_user
+
+        # Support BPH alias (Ketua, Wakil, Sekretaris, Bendahara)
+        if "ADMIN_BPH" in normalized_roles and (user_role in ("KETUA", "WAKIL KETUA", "SEKRETARIS", "BENDAHARA") or (current_user.get("division") or "").upper() == "BPH"):
             return current_user
 
         raise HTTPException(
