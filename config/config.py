@@ -1,5 +1,4 @@
 import logging
-import os
 import tomllib
 from pathlib import Path
 
@@ -63,6 +62,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ]
+    CORS_ORIGIN_REGEX: str | None = Field(
+        default=r"^https:\/\/.*\.trycloudflare\.com$",
+        validation_alias="CORS_ORIGIN_REGEX",
+    )
     DEBUG: bool = Field(default=True, validation_alias="DEBUG")
     LOG_LEVEL: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
@@ -110,6 +113,12 @@ class Settings(BaseSettings):
             # In production, filter out wildcard
             return [o for o in self.CORS_ORIGINS if o != "*"]
         return self.CORS_ORIGINS
+
+    def get_allowed_origin_regex(self) -> str | None:
+        """Return CORS origin regex, or None in production unless explicitly configured."""
+        if self.ENVIRONMENT.lower() == "production" and self.CORS_ORIGIN_REGEX == r"^https:\/\/.*\.trycloudflare\.com$":
+            return None
+        return self.CORS_ORIGIN_REGEX
 
 
 settings = Settings()

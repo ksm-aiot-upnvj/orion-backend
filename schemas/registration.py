@@ -19,6 +19,22 @@ class RegistrationCreate(BaseModel):
     photo: str | None = None
     consent_given: bool = True
 
+    @field_validator("motivation")
+    @classmethod
+    def validate_motivation(cls, v: str | None) -> str | None:
+        if not v:
+            return v
+        import re
+        text_clean = v.strip()
+        # Count sentences: split by ., !, ?
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text_clean) if s.strip()]
+        if len(sentences) > 3:
+            raise ValueError("Teks motivasi maksimal terdiri dari 3 kalimat.")
+        words = [w for w in text_clean.split() if w.strip()]
+        if len(words) > 100:
+            raise ValueError("Teks motivasi maksimal terdiri dari 100 kata.")
+        return v
+
     @field_validator("interest_track", mode="before")
     @classmethod
     def parse_interest_track(cls, v: Any) -> list[ResearchField]:
@@ -41,6 +57,22 @@ class RegistrationCreate(BaseModel):
         if isinstance(v, list):
             return v
         return [ResearchField.AI]
+
+
+class IntakeStatusResponse(BaseModel):
+    status: str
+    batch_name: str
+    deadline: str
+    quota: int
+    updated_at: datetime | None = None
+    updated_by: uuid.UUID | None = None
+
+
+class IntakeStatusUpdate(BaseModel):
+    status: str  # OPEN or CLOSED
+    batch_name: str
+    deadline: str  # YYYY-MM-DD
+    quota: int = 100
 
 
 class RegistrationReview(BaseModel):

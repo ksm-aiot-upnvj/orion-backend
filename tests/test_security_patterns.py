@@ -1,5 +1,5 @@
-import io
 import uuid
+
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -7,11 +7,10 @@ from httpx import ASGITransport, AsyncClient
 from config.db import AsyncSessionLocal, Base, engine
 from main import app
 from models import AuditLog, Member, Registration, User  # noqa: F401
-from services.audit_log_service import AuditLogService, log_audit_event
-from services.member_service import MemberService
-from services.storage_service import StorageService, validate_image_magic_bytes
+from services.audit_log_service import AuditLogService
+from services.storage_service import validate_image_magic_bytes
 from utils.auth_deps import SystemRole, verify_resource_owner
-from utils.rate_limiter import InMemoryRateLimiter, rate_limit
+from utils.rate_limiter import InMemoryRateLimiter
 
 
 @pytest.fixture(autouse=True)
@@ -163,6 +162,11 @@ async def test_audit_log_service():
         assert len(logs) >= 1
         assert logs[0]["action"] == "TEST_SECURITY_AUDIT"
 
+        # Explicit Cleanup: Clean up test audit logs to prevent noise
+        from sqlalchemy import text
+        await session.execute(text("DELETE FROM audit_logs WHERE resource_type = 'SECURITY_TEST'"))
+        await session.commit()
+
 
 # --- 6. Security Headers Check ---
 @pytest.mark.asyncio
@@ -174,3 +178,32 @@ async def test_security_headers_present():
         assert res.headers.get("X-Frame-Options") == "DENY"
         assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
         assert "max-age=31536000" in res.headers.get("Strict-Transport-Security", "")
+
+
+# --- 7. Cloudflare Tunnel CORS Preflight Check ---
+@pytest.mark.asyncio
+async def test_cors_cloudflare_tunnel_preflight():
+    origin = "https://bubble-compiler-arthritis-licensing.trycloudflare.com"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        res = await ac.options(
+            "/orion/api/v1/auth/login",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers.get("Access-Control-Allow-Origin") == origin
+        assert res.headers.get("Access-Control-Allow-Credentials") == "true"
+        assert "POST" in res.headers.get("Access-Control-Allow-Methods", "")
+
+        # Test rejected random malicious origin
+        bad_res = await ac.options(
+            "/orion/api/v1/auth/login",
+            headers={
+                "Origin": "https://malicious-site.evil.com",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert "Access-Control-Allow-Origin" not in bad_res.headers

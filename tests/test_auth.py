@@ -15,7 +15,8 @@ async def test_auth_login_superadmin():
         data = response.json()
         assert "access_token" in data
         assert data["user"]["full_name"] == "Dzulfikri Adjmal"
-        assert data["user"]["role"] == "SUPERADMIN"
+        assert data["user"]["role"] == "Ketua"
+        assert data["user"]["is_superadmin"] is True
         assert data["user"]["student_id"] == "2210511084"
 
 

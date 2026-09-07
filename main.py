@@ -14,6 +14,7 @@ from config.db import AsyncSessionLocal, Base, engine, get_db
 from routes.auth_routes import router as auth_router
 from routes.member_routes import router as member_router
 from routes.registration_routes import router as registration_router
+from routes.upload_routes import direct_avatar_router
 from routes.upload_routes import router as upload_router
 from utils.seed import seed_database
 
@@ -71,6 +72,7 @@ async def add_security_headers(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins(),
+    allow_origin_regex=settings.get_allowed_origin_regex(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -78,12 +80,15 @@ app.add_middleware(
 )
 
 
+from fastapi.encoders import jsonable_encoder
+
+
 # 3. Global Exception Handlers (Prevent stack trace & raw query leaks in production)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "message": "Format data permintaan tidak valid."},
+        content={"detail": jsonable_encoder(exc.errors()), "message": "Format data permintaan tidak valid."},
     )
 
 
@@ -99,7 +104,7 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled server exception: %s", exc, exc_info=True)
+    logger.error("Unhandled server exception: %s", exc)
     if isinstance(exc, HTTPException):
         return JSONResponse(
             status_code=exc.status_code,
@@ -119,6 +124,7 @@ api_v1_router.include_router(auth_router)
 api_v1_router.include_router(registration_router)
 api_v1_router.include_router(member_router)
 api_v1_router.include_router(upload_router)
+api_v1_router.include_router(direct_avatar_router)
 
 # Mount both prefixed and root routers for maximum compatibility
 app.include_router(api_v1_router)
@@ -126,6 +132,7 @@ app.include_router(auth_router)
 app.include_router(registration_router)
 app.include_router(member_router)
 app.include_router(upload_router)
+app.include_router(direct_avatar_router)
 
 
 @app.get("/health", tags=["Health"])

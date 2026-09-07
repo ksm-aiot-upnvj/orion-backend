@@ -27,7 +27,6 @@ def sanitize_dict_fields(data: dict[str, Any], fields_to_sanitize: list[str] | N
     """
     sanitized = data.copy()
     for key, val in sanitized.items():
-        if isinstance(val, str):
-            if fields_to_sanitize is None or key in fields_to_sanitize:
-                sanitized[key] = sanitize_text(val)
+        if isinstance(val, str) and (fields_to_sanitize is None or key in fields_to_sanitize):
+            sanitized[key] = sanitize_text(val)
     return sanitized

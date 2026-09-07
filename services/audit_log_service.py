@@ -93,7 +93,7 @@ class AuditLogService:
             await self.session.commit()
             return result.mappings().first()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - Audit logging should never crash the main transaction
             logger.error("Gagal mencatat audit log: %s | Action: %s | Resource: %s", e, action, resource_type)
             return None
 

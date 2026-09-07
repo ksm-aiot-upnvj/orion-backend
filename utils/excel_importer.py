@@ -81,6 +81,10 @@ class ExcelMemberImporter:
                 role = MemberRole.KETUA.value
             elif "Wakil" in raw_role:
                 role = MemberRole.WAKIL_KETUA.value
+            elif "Sekretaris" in raw_role:
+                role = MemberRole.SEKRETARIS.value
+            elif "Bendahara" in raw_role:
+                role = MemberRole.BENDAHARA.value
             elif "Kepala" in raw_role or "Kadiv" in raw_role or "Koordinator" in raw_role:
                 role = MemberRole.KEPALA_DIVISI.value
             elif "Staff" in raw_role or "Staf" in raw_role:
@@ -239,9 +243,10 @@ class ExcelMemberImporter:
                     registration_timestamp = EXCLUDED.registration_timestamp,
                     status = EXCLUDED.status,
                     join_date = EXCLUDED.join_date
+                RETURNING id
                 """
             )
-            await db.execute(member_stmt, {
+            res = await db.execute(member_stmt, {
                 "id": m_uuid,
                 "member_id": member_id,
                 "student_id": student_id,
@@ -272,37 +277,36 @@ class ExcelMemberImporter:
                 "status": m["status"],
                 "join_date": m["join_date"],
             })
+            actual_member_id = res.scalar_one()
             imported_count += 1
 
             # 2. Upsert corresponding User login account
-            user_role = "PENGURUS"
-            if "Ketua" in m["role"] and "Wakil" not in m["role"]:
-                user_role = "SUPERADMIN"
-            elif "Wakil" in m["role"] or "Sekretaris" in m["role"] or "Bendahara" in m["role"]:
-                user_role = "ADMIN_BPH"
-            elif "Anggota" in m["role"]:
-                user_role = "ANGGOTA"
+            is_super = "Ketua" in m["role"] and "Wakil" not in m["role"]
 
             user_stmt = text(
                 """
-                INSERT INTO users (id, student_id, full_name, email, hashed_password, role, division, avatar, is_active, created_at)
-                VALUES (:id, :student_id, :full_name, :email, :hashed_password, :role, :division, :avatar, true, NOW())
+                INSERT INTO users (id, member_id, student_id, full_name, email, hashed_password, role, division, avatar, is_superadmin, is_active, created_at)
+                VALUES (:id, :member_id, :student_id, :full_name, :email, :hashed_password, :role, :division, :avatar, :is_superadmin, true, NOW())
                 ON CONFLICT (student_id) DO UPDATE SET
+                    member_id = EXCLUDED.member_id,
                     full_name = EXCLUDED.full_name,
                     email = EXCLUDED.email,
                     role = EXCLUDED.role,
-                    division = EXCLUDED.division
+                    division = EXCLUDED.division,
+                    is_superadmin = EXCLUDED.is_superadmin
                 """
             )
             await db.execute(user_stmt, {
                 "id": generate_uuid7(),
+                "member_id": actual_member_id,
                 "student_id": student_id,
                 "full_name": m["full_name"],
                 "email": m["email"],
                 "hashed_password": default_hash,
-                "role": user_role,
+                "role": m["role"],
                 "division": m["division"],
                 "avatar": None,
+                "is_superadmin": is_super,
             })
             user_synced_count += 1
 

@@ -33,11 +33,16 @@ async def test_upload_avatar_exif_stripped_and_webp_converted():
         assert "path" in data
         assert data["path"].startswith("avatars/")
 
-        # Test serving the file
+        # Test serving the file via both /uploads/avatars and direct /avatars route
         filename = data["filename"]
         serve_res = await ac.get(f"/orion/api/v1/uploads/avatars/{filename}")
         assert serve_res.status_code == 200
         assert serve_res.headers["content-type"] == "image/webp"
+
+        # Direct route test
+        direct_res = await ac.get(f"/orion/api/v1/avatars/{filename}")
+        assert direct_res.status_code == 200
+        assert direct_res.headers["content-type"] == "image/webp"
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from services.storage_service import StorageService
-from utils.auth_deps import get_current_user, require_roles
+from utils.auth_deps import require_roles
 from utils.rate_limiter import rate_limit
 
 router = APIRouter(prefix="/uploads", tags=["File Storage & Uploads (UU PDP / GDPR Compliant)"])
@@ -59,6 +59,15 @@ async def serve_avatar(filename: str):
             "Content-Security-Policy": "default-src 'none'",
         },
     )
+
+
+# Direct alias router so /orion/api/v1/avatars/{filename} and /avatars/{filename} resolve directly
+direct_avatar_router = APIRouter(tags=["File Storage & Uploads"])
+
+
+@direct_avatar_router.get("/avatars/{filename}")
+async def serve_avatar_direct(filename: str):
+    return await serve_avatar(filename)
 
 
 @router.delete("/avatars/{filename}")
