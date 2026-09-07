@@ -51,3 +51,35 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
             yield session
         finally:
             await session.close()
+
+
+ENUM_DEFINITIONS_SQL = """
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'selection_status_enum') THEN
+        CREATE TYPE selection_status_enum AS ENUM ('Accepted', 'Pending', 'Rejected');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'member_status_enum') THEN
+        CREATE TYPE member_status_enum AS ENUM ('Aktif', 'Tidak Aktif', 'Alumni');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'research_field_enum') THEN
+        CREATE TYPE research_field_enum AS ENUM ('IoT Embedded', 'AI', 'Software Engineer & Cloud');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'role_enum') THEN
+        CREATE TYPE role_enum AS ENUM ('Ketua', 'Wakil Ketua', 'Sekretaris', 'Bendahara', 'Kepala Divisi', 'Staff', 'Anggota');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'division_enum') THEN
+        CREATE TYPE division_enum AS ENUM ('BPH', 'Akademik Riset', 'PSDM', 'Humas Multimedia');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'study_program_enum') THEN
+        CREATE TYPE study_program_enum AS ENUM ('S1 Informatika', 'S1 Sistem Informasi', 'S1 Sains Data', 'D3 Sistem Informasi');
+    END IF;
+END $$;
+"""
+
+
+async def ensure_enums_and_tables(connection):
+    """Ensure all PostgreSQL custom ENUM types and tables exist (safe on fresh & existing DB)."""
+    from sqlalchemy import text
+    await connection.execute(text(ENUM_DEFINITIONS_SQL))
+    await connection.run_sync(Base.metadata.create_all)
+
