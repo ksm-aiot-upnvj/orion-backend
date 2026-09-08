@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import text
 
 from config.db import AsyncSessionLocal
+from utils.rate_limiter import InMemoryRateLimiter
 
 
 @pytest.fixture(autouse=True)
@@ -10,7 +11,9 @@ async def auto_clean_database_noise():
     Automatic fixture executed for each test function to guarantee
     zero test noise / garbage accumulation in the PostgreSQL database.
     """
+    InMemoryRateLimiter.reset()
     yield
+    InMemoryRateLimiter.reset()
 
     # Teardown: Clean up any test records created during test execution
     try:
@@ -28,7 +31,7 @@ async def auto_clean_database_noise():
             await session.execute(
                 text("""
                     UPDATE system_settings
-                    SET value = '{"status": "OPEN", "batch_name": "Penerimaan Anggota Baru Periode 2026", "deadline": "2026-08-31", "quota": 100}',
+                    SET value = '{"status": "OPEN", "batch_name": "Penerimaan Anggota Baru Periode 2026", "deadline": "2026-12-31", "quota": 100}',
                         updated_at = NOW()
                     WHERE key = 'intake_config';
                 """)

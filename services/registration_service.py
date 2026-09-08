@@ -317,3 +317,63 @@ class RegistrationService:
             )
 
         return True
+
+    async def bulk_delete_registrations(self, identifiers: list[str], actor: dict | None = None) -> int:
+        """Bulk hard delete registrations and unlink physical photos (Right to Erasure)."""
+        if not identifiers:
+            return 0
+
+        valid_uuids = []
+        student_ids = []
+        for ident in identifiers:
+            try:
+                valid_uuids.append(uuid.UUID(str(ident)))
+            except (ValueError, AttributeError):
+                student_ids.append(str(ident))
+
+        conditions = []
+        params = {}
+        if valid_uuids:
+            conditions.append("id = ANY(:u_ids)")
+            params["u_ids"] = valid_uuids
+        if student_ids:
+            conditions.append("student_id = ANY(:s_ids)")
+            params["s_ids"] = student_ids
+
+        if not conditions:
+            return 0
+
+        where_clause = " OR ".join(conditions)
+        fetch_stmt = text(f"SELECT id, student_id, photo FROM registrations WHERE {where_clause}")
+        res = await self.session.execute(fetch_stmt, params)
+        rows = res.mappings().all()
+
+        if not rows:
+            return 0
+
+        storage_service = StorageService()
+        deleted_ids = []
+        deleted_student_ids = []
+        for row in rows:
+            if row.get("photo"):
+                storage_service.delete_avatar(row["photo"])
+            deleted_ids.append(row["id"])
+            deleted_student_ids.append(row["student_id"])
+
+        del_stmt = text("DELETE FROM registrations WHERE id = ANY(:del_ids)")
+        await self.session.execute(del_stmt, {"del_ids": deleted_ids})
+        await self.session.commit()
+
+        if actor:
+            await log_audit_event(
+                session=self.session,
+                action="REGISTRATIONS_BULK_DELETED",
+                resource_type="REGISTRATION",
+                resource_id="BULK",
+                actor_id=actor.get("id"),
+                actor_name=actor.get("full_name"),
+                actor_role=actor.get("role"),
+                details={"deleted_count": len(deleted_ids), "student_ids": deleted_student_ids},
+            )
+
+        return len(deleted_ids)

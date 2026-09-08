@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.db import get_db
 from models.enums import MemberRole
 from schemas.registration import (
+    BulkDeleteRegistrationsRequest,
+    BulkDeleteRegistrationsResponse,
     IntakeStatusResponse,
     IntakeStatusUpdate,
     RegistrationCreate,
@@ -212,6 +214,25 @@ async def reject_registration(
         reviewer_id=current_user["id"],
     )
     return RegistrationResponse.model_validate(reg)
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteRegistrationsResponse)
+async def bulk_delete_registrations(
+    payload: BulkDeleteRegistrationsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_selection),
+):
+    """
+    Admin endpoint: Bulk hard delete registrations and unlink physical photos (Right to Erasure).
+    Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM.
+    """
+    service = RegistrationService(db)
+    deleted_count = await service.bulk_delete_registrations(payload.registration_ids, actor=current_user)
+    return BulkDeleteRegistrationsResponse(
+        status="success",
+        deleted_count=deleted_count,
+        message=f"{deleted_count} data pendaftaran berhasil dihapus permanen (Right to Erasure).",
+    )
 
 
 @router.delete("/{identifier}")

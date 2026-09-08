@@ -101,3 +101,13 @@ class RegistrationResponse(BaseModel):
     submit_date: str | None = None
     consent_given: bool = True
     consent_timestamp: datetime | None = None
+
+
+class BulkDeleteRegistrationsRequest(BaseModel):
+    registration_ids: list[str]
+
+
+class BulkDeleteRegistrationsResponse(BaseModel):
+    status: str = "success"
+    deleted_count: int
+    message: str

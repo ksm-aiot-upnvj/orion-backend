@@ -65,6 +65,9 @@ class MemberCreate(BaseModel):
     avatar: str | None = None
     status: MemberStatus = MemberStatus.AKTIF
     join_date: str | None = None
+    create_erp_account: bool = False
+    erp_password: str | None = None
+    erp_role: str | None = "PENGURUS"
 
 
 class MemberUpdate(BaseModel):
@@ -93,11 +96,26 @@ class MemberUpdate(BaseModel):
     avatar: str | None = None
     status: MemberStatus | None = None
     join_date: str | None = None
+    create_erp_account: bool | None = None
+    erp_password: str | None = None
+    erp_role: str | None = None
 
 
 class MemberResponse(MemberBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    has_erp_access: bool = False
+    user_role: str | None = None
+    user_is_active: bool | None = None
+
+
+class GrantERPAccessRequest(BaseModel):
+    password: str
+    role: str = "PENGURUS"
+
+
+class ResetMemberPasswordRequest(BaseModel):
+    new_password: str
 
 

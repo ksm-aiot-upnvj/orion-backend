@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import get_db
-from schemas.member import MemberCreate, MemberResponse, MemberUpdate
+from schemas.member import (
+    GrantERPAccessRequest,
+    MemberCreate,
+    MemberResponse,
+    MemberUpdate,
+    ResetMemberPasswordRequest,
+)
 from services.member_service import MemberService
 from utils.auth_deps import can_manage_members, require_pengurus
 from utils.excel_importer import ExcelMemberImporter
@@ -139,3 +145,56 @@ async def import_members_excel(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal memproses Excel: {e!s}") from e
+
+
+@router.post("/{identifier}/access")
+async def grant_erp_access(
+    identifier: str,
+    payload: GrantERPAccessRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_members),
+):
+    """
+    Grant or activate ERP dashboard login access for a member.
+    Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
+    """
+    service = MemberService(db)
+    return await service.grant_erp_access(
+        identifier=identifier,
+        password=payload.password,
+        erp_role=payload.role,
+        actor=current_user,
+    )
+
+
+@router.delete("/{identifier}/access")
+async def revoke_erp_access(
+    identifier: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_members),
+):
+    """
+    Revoke/deactivate ERP login access for a member (e.g. when demisioner).
+    Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
+    """
+    service = MemberService(db)
+    return await service.revoke_erp_access(identifier=identifier, actor=current_user)
+
+
+@router.post("/{identifier}/reset-password")
+async def reset_erp_password(
+    identifier: str,
+    payload: ResetMemberPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_members),
+):
+    """
+    Reset ERP password for a member's login account.
+    Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
+    """
+    service = MemberService(db)
+    return await service.reset_erp_password(
+        identifier=identifier,
+        new_password=payload.new_password,
+        actor=current_user,
+    )
