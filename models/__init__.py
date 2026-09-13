@@ -1,3 +1,4 @@
+from models.alumni_profile_model import AlumniProfile
 from models.audit_log_model import AuditLog
 from models.enums import (
     Division,
@@ -13,6 +14,7 @@ from models.system_setting_model import SystemSetting
 from models.user_model import User
 
 __all__ = [
+    "AlumniProfile",
     "AuditLog",
     "Division",
     "Member",
@@ -25,4 +27,3 @@ __all__ = [
     "SystemSetting",
     "User",
 ]
-

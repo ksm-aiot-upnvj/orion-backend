@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,12 @@ class MemberService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_all_members(self, division: str | None = None, intake_period: str | None = None) -> list[dict]:
+    async def get_all_members(
+        self,
+        division: str | None = None,
+        intake_period: str | None = None,
+        member_status: str | None = None,
+    ) -> list[dict]:
         """Fetch all members with ERP access status using raw parameterized SQL."""
         query_str = """
             SELECT m.id, m.member_id, m.student_id, m.full_name, m.program_of_study, m.semester, m.email, m.contact_info, m.domicile_city,
@@ -43,11 +48,66 @@ class MemberService:
         if intake_period and intake_period != "all":
             query_str += " AND m.intake_period = :intake_period"
             params["intake_period"] = intake_period
+        if member_status and member_status != "all":
+            query_str += " AND m.status = :member_status"
+            params["member_status"] = member_status
 
         query_str += " ORDER BY m.created_at ASC"
 
         result = await self.session.execute(text(query_str), params)
         return result.mappings().all()
+
+    async def get_alumni_profile(self, identifier: str) -> dict | None:
+        member = await self.get_member_by_identifier(identifier)
+        if not member:
+            return None
+        result = await self.session.execute(
+            text("SELECT * FROM alumni_profiles WHERE member_id = :member_id"),
+            {"member_id": member["id"]},
+        )
+        profile = result.mappings().first()
+        return dict(profile) if profile else None
+
+    async def upsert_alumni_profile(self, identifier: str, profile_data: dict, actor: dict | None = None) -> dict:
+        member = await self.get_member_by_identifier(identifier)
+        if not member:
+            raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
+        if member["status"] != MemberStatus.ALUMNI.value:
+            raise HTTPException(
+                status_code=409, detail="Profil alumni hanya dapat diatur untuk anggota berstatus Alumni"
+            )
+
+        params = {
+            "id": generate_uuid7(),
+            "member_id": member["id"],
+            **profile_data,
+        }
+        result = await self.session.execute(
+            text(
+                """
+                INSERT INTO alumni_profiles (
+                    id, member_id, graduation_year, current_company, current_role,
+                    linkedin_url, testimonial, visibility, consent_given, created_at, updated_at
+                ) VALUES (
+                    :id, :member_id, :graduation_year, :current_company, :current_role,
+                    :linkedin_url, :testimonial, :visibility, :consent_given, NOW(), NOW()
+                )
+                ON CONFLICT (member_id) DO UPDATE SET
+                    graduation_year = EXCLUDED.graduation_year,
+                    current_company = EXCLUDED.current_company,
+                    current_role = EXCLUDED.current_role,
+                    linkedin_url = EXCLUDED.linkedin_url,
+                    testimonial = EXCLUDED.testimonial,
+                    visibility = EXCLUDED.visibility,
+                    consent_given = EXCLUDED.consent_given,
+                    updated_at = NOW()
+                RETURNING *
+                """
+            ),
+            params,
+        )
+        await self.session.commit()
+        return dict(result.mappings().first())
 
     async def get_member_by_identifier(self, identifier: str) -> dict | None:
         """Find member by UUID, member_id or student_id with ERP access info."""
@@ -125,9 +185,8 @@ class MemberService:
             for mid in rows:
                 try:
                     num = int(str(mid).split("-")[-1])
-                    if num > max_num:
-                        max_num = num
-                except Exception:
+                    max_num = max(max_num, num)
+                except ValueError:
                     pass
             member_id = f"AIOT-{year}-{str(max_num + 1).zfill(3)}"
 
@@ -235,7 +294,7 @@ class MemberService:
             erp_pwd = str(member_data["erp_password"])
             erp_role = member_data.get("erp_role") or "PENGURUS"
             hashed_pwd = hash_password(erp_pwd)
-            is_superadmin = (erp_role == "SUPERADMIN")
+            is_superadmin = erp_role == "SUPERADMIN"
 
             user_stmt = text(
                 """
@@ -343,6 +402,19 @@ class MemberService:
             updated_row["has_erp_access"] = False
             updated_row["user_is_active"] = False
 
+        if new_status == MemberStatus.ALUMNI.value:
+            await self.session.execute(
+                text(
+                    """
+                    INSERT INTO alumni_profiles (id, member_id, visibility, consent_given, created_at, updated_at)
+                    VALUES (:id, :member_id, false, false, NOW(), NOW())
+                    ON CONFLICT (member_id) DO NOTHING
+                    """
+                ),
+                {"id": generate_uuid7(), "member_id": existing["id"]},
+            )
+            await self.session.commit()
+
         # If explicit ERP credentials provided in update
         if create_erp and erp_pwd:
             role_val = erp_role or "PENGURUS"
@@ -378,7 +450,7 @@ class MemberService:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
 
         hashed_pwd = hash_password(password)
-        is_superadmin = (erp_role == "SUPERADMIN")
+        is_superadmin = erp_role == "SUPERADMIN"
 
         user_stmt = text(
             """

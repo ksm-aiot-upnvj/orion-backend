@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.config import settings
-from config.db import AsyncSessionLocal, Base, engine, ensure_enums_and_tables, get_db
+from config.db import AsyncSessionLocal, engine, ensure_enums_and_tables, get_db
 from routes.auth_routes import router as auth_router
 from routes.member_routes import router as member_router
 from routes.registration_routes import router as registration_router
@@ -19,6 +20,7 @@ from routes.upload_routes import router as upload_router
 from utils.seed import seed_database
 
 logger = logging.getLogger("orion.api")
+templates = Jinja2Templates(directory="templates")
 
 
 @asynccontextmanager
@@ -39,11 +41,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    root_path="/orion/api/v1",
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,
     redoc_url=None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
+
 
 # 1. Security Headers Middleware (OWASP Secure Headers Project)
 @app.middleware("http")
@@ -133,6 +135,25 @@ app.include_router(registration_router)
 app.include_router(member_router)
 app.include_router(upload_router)
 app.include_router(direct_avatar_router)
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get(f"{settings.API_V1_STR}/", response_class=HTMLResponse, include_in_schema=False)
+async def api_landing_page(request: Request):
+    request_path = request.url.path.rstrip("/")
+    api_prefix = settings.API_V1_STR.rstrip("/")
+    public_prefix = api_prefix if request_path == api_prefix else ""
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "title": settings.PROJECT_NAME,
+            "description": "Backend API untuk manajemen KSM AIoT Orion.",
+            "docs_url": f"{public_prefix}/docs",
+            "health_url": f"{public_prefix}/health",
+            "api_prefix": api_prefix,
+        },
+    )
 
 
 @app.get("/health", tags=["Health"])

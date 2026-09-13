@@ -1,5 +1,7 @@
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import text
@@ -12,6 +14,10 @@ from utils.sanitizer import sanitize_dict_fields
 from utils.uuid_utils import generate_uuid7
 
 
+def _mapping_to_dict(row: Mapping[Any, Any] | None) -> dict[str, Any] | None:
+    return dict(row) if row is not None else None
+
+
 class RegistrationService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -22,13 +28,15 @@ class RegistrationService:
             reg_uuid = uuid.UUID(identifier)
             stmt = text("SELECT * FROM registrations WHERE id = :uuid")
             result = await self.session.execute(stmt, {"uuid": reg_uuid})
-            return result.mappings().first()
+            return _mapping_to_dict(result.mappings().first())
         except ValueError:
             stmt = text("SELECT * FROM registrations WHERE student_id = :identifier")
             result = await self.session.execute(stmt, {"identifier": identifier})
-            return result.mappings().first()
+            return _mapping_to_dict(result.mappings().first())
 
-    async def create_registration(self, payload: dict, ip_address: str | None = None, user_agent: str | None = None) -> dict:
+    async def create_registration(
+        self, payload: dict, ip_address: str | None = None, user_agent: str | None = None
+    ) -> dict:
         """Insert new recruitment candidate with explicit consent and raw SQL."""
         payload = sanitize_dict_fields(payload)
 
@@ -48,7 +56,7 @@ class RegistrationService:
         raw_tracks = payload.get("interest_track") or [ResearchField.AI]
         if isinstance(raw_tracks, str):
             raw_tracks = [raw_tracks]
-        tracks = [t.value if hasattr(t, "value") else str(t) for t in raw_tracks]
+        tracks = [getattr(track, "value", str(track)) for track in raw_tracks]
 
         prodi_val = payload["program_of_study"]
         if hasattr(prodi_val, "value"):
@@ -87,7 +95,9 @@ class RegistrationService:
         }
         result = await self.session.execute(stmt, params)
         await self.session.commit()
-        created_reg = result.mappings().first()
+        created_reg = _mapping_to_dict(result.mappings().first())
+        if created_reg is None:
+            raise HTTPException(status_code=500, detail="Pendaftaran gagal dibuat")
 
         # Audit Log: Public registration event
         await log_audit_event(
@@ -133,7 +143,7 @@ class RegistrationService:
 
         query_str += " ORDER BY created_at DESC"
         result = await self.session.execute(text(query_str), params)
-        return result.mappings().all()
+        return [dict(row) for row in result.mappings().all()]
 
     async def approve_registration(
         self,
@@ -155,7 +165,8 @@ class RegistrationService:
         # Count members for sequential ID
         count_stmt = text("SELECT COUNT(*) AS total FROM members")
         count_res = await self.session.execute(count_stmt)
-        total_members = count_res.mappings().first()["total"]
+        total_row = _mapping_to_dict(count_res.mappings().first())
+        total_members = total_row["total"] if total_row else 0
 
         intake_raw = str(reg.get("intake_period") or "").strip()
         student_id_raw = str(reg.get("student_id") or "").strip()
@@ -189,7 +200,9 @@ class RegistrationService:
                 "id": reg["id"],
             },
         )
-        updated_reg = updated_res.mappings().first()
+        updated_reg = _mapping_to_dict(updated_res.mappings().first())
+        if updated_reg is None:
+            raise HTTPException(status_code=500, detail="Status pendaftaran gagal diperbarui")
 
         # Check existing member
         check_member = text("SELECT id FROM members WHERE student_id = :student_id")
@@ -199,8 +212,8 @@ class RegistrationService:
             if isinstance(reg_tracks, str):
                 reg_tracks = [reg_tracks]
 
-            div_val = division.value if hasattr(division, "value") else division
-            role_val = role.value if hasattr(role, "value") else (role or MemberRole.ANGGOTA.value)
+            div_val = getattr(division, "value", division)
+            role_val = getattr(role, "value", role or MemberRole.ANGGOTA.value)
 
             insert_m_stmt = text(
                 """
@@ -274,7 +287,9 @@ class RegistrationService:
             },
         )
         await self.session.commit()
-        rejected_reg = res.mappings().first()
+        rejected_reg = _mapping_to_dict(res.mappings().first())
+        if rejected_reg is None:
+            raise HTTPException(status_code=500, detail="Status pendaftaran gagal diperbarui")
 
         # Audit log
         await log_audit_event(
@@ -295,6 +310,12 @@ class RegistrationService:
         reg = await self.get_registration_by_identifier(identifier)
         if not reg:
             return False
+
+        if reg.get("status") == SelectionStatus.ACCEPTED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Pendaftaran yang sudah diterima tidak dapat dihapus dari modul seleksi.",
+            )
 
         # Unlink physical photo file if stored locally
         if reg.get("photo"):
@@ -328,7 +349,7 @@ class RegistrationService:
         for ident in identifiers:
             try:
                 valid_uuids.append(uuid.UUID(str(ident)))
-            except (ValueError, AttributeError):
+            except ValueError:
                 student_ids.append(str(ident))
 
         conditions = []
@@ -350,6 +371,12 @@ class RegistrationService:
 
         if not rows:
             return 0
+
+        if any(row.get("status") == SelectionStatus.ACCEPTED.value for row in rows):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Batch mengandung pendaftaran yang sudah diterima dan tidak dapat dihapus.",
+            )
 
         storage_service = StorageService()
         deleted_ids = []

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import get_db
+from schemas.alumni_profile import AlumniProfileResponse, AlumniProfileUpdate
 from schemas.member import (
     GrantERPAccessRequest,
     MemberCreate,
@@ -22,13 +23,44 @@ router = APIRouter(prefix="/members", tags=["Members & Alumni"])
 async def list_members(
     division: str | None = None,
     intake_period: str | None = None,
+    status: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_pengurus),
 ):
     """List all registered KSM AIoT members. Enforced RBAC: Pengurus only (Anggota Umum denied)."""
     service = MemberService(db)
-    members = await service.get_all_members(division=division, intake_period=intake_period)
+    members = await service.get_all_members(division=division, intake_period=intake_period, member_status=status)
     return [MemberResponse.model_validate(m) for m in members]
+
+
+@router.get("/{identifier}/alumni-profile", response_model=AlumniProfileResponse | None)
+async def get_alumni_profile(
+    identifier: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_pengurus),
+):
+    service = MemberService(db)
+    profile = await service.get_alumni_profile(identifier)
+    if profile is None:
+        member = await service.get_member_by_identifier(identifier)
+        if not member:
+            raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
+    return profile
+
+
+@router.put("/{identifier}/alumni-profile", response_model=AlumniProfileResponse)
+async def update_alumni_profile(
+    identifier: str,
+    payload: AlumniProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_members),
+):
+    service = MemberService(db)
+    profile_data = payload.model_dump()
+    if profile_data.get("linkedin_url") is not None:
+        profile_data["linkedin_url"] = str(profile_data["linkedin_url"])
+    profile = await service.upsert_alumni_profile(identifier, profile_data, actor=current_user)
+    return AlumniProfileResponse.model_validate(profile)
 
 
 @router.post("/", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
