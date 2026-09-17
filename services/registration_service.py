@@ -314,14 +314,13 @@ class RegistrationService:
         if not reg:
             return False
 
-        if reg.get("status") == SelectionStatus.ACCEPTED.value:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Pendaftaran yang sudah diterima tidak dapat dihapus dari modul seleksi.",
-            )
-
         # Unlink physical photo & CV files if stored locally (Right to Erasure)
-        if reg.get("photo"):
+        is_accepted = str(reg.get("status", "")).lower() == SelectionStatus.ACCEPTED.value.lower()
+        if (
+            reg.get("photo")
+            and not is_accepted
+            and not await self._is_avatar_referenced_by_member(reg["photo"])
+        ):
             StorageService().delete_avatar(reg["photo"])
         if reg.get("cv_url"):
             StorageService().delete_cv(reg["cv_url"])
@@ -370,24 +369,23 @@ class RegistrationService:
             return 0
 
         where_clause = " OR ".join(conditions)
-        fetch_stmt = text(f"SELECT id, student_id, photo, cv_url FROM registrations WHERE {where_clause}")
+        fetch_stmt = text(f"SELECT id, student_id, status, photo, cv_url FROM registrations WHERE {where_clause}")
         res = await self.session.execute(fetch_stmt, params)
         rows = res.mappings().all()
 
         if not rows:
             return 0
 
-        if any(row.get("status") == SelectionStatus.ACCEPTED.value for row in rows):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Batch mengandung pendaftaran yang sudah diterima dan tidak dapat dihapus.",
-            )
-
         storage_service = StorageService()
         deleted_ids = []
         deleted_student_ids = []
         for row in rows:
-            if row.get("photo"):
+            is_accepted = str(row.get("status", "")).lower() == SelectionStatus.ACCEPTED.value.lower()
+            if (
+                row.get("photo")
+                and not is_accepted
+                and not await self._is_avatar_referenced_by_member(row["photo"])
+            ):
                 storage_service.delete_avatar(row["photo"])
             if row.get("cv_url"):
                 storage_service.delete_cv(row["cv_url"])
@@ -411,3 +409,9 @@ class RegistrationService:
             )
 
         return len(deleted_ids)
+
+    async def _is_avatar_referenced_by_member(self, avatar_path: str) -> bool:
+        """Keep an approved member's avatar file when its source registration is deleted."""
+        stmt = text("SELECT EXISTS (SELECT 1 FROM members WHERE avatar = :avatar_path)")
+        result = await self.session.execute(stmt, {"avatar_path": avatar_path})
+        return bool(result.scalar())

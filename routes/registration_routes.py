@@ -223,7 +223,7 @@ async def bulk_delete_registrations(
     current_user: dict = Depends(can_manage_selection),
 ):
     """
-    Admin endpoint: Bulk hard delete registrations and unlink physical photos (Right to Erasure).
+    Admin endpoint: Bulk hard delete registrations and unlink unreferenced files.
     Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM.
     """
     service = RegistrationService(db)
@@ -231,7 +231,7 @@ async def bulk_delete_registrations(
     return BulkDeleteRegistrationsResponse(
         status="success",
         deleted_count=deleted_count,
-        message=f"{deleted_count} data pendaftaran berhasil dihapus permanen (Right to Erasure).",
+        message=f"{deleted_count} data pendaftaran berhasil dihapus permanen. File yang masih dipakai member tetap dipertahankan.",
     )
 
 
@@ -242,11 +242,11 @@ async def delete_registration(
     current_user: dict = Depends(can_manage_selection),
 ):
     """
-    Admin endpoint: Hard delete registration and unlink physical photo (Right to Erasure).
+    Admin endpoint: Hard delete registration and unlink unreferenced files.
     Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM.
     """
     service = RegistrationService(db)
     success = await service.delete_registration(identifier, actor=current_user)
     if not success:
         raise HTTPException(status_code=404, detail="Data pendaftaran tidak ditemukan.")
-    return {"status": "success", "message": "Data pendaftaran dan file foto berhasil dihapus permanen (Right to Erasure)."}
+    return {"status": "success", "message": "Data pendaftaran berhasil dihapus permanen. File yang masih dipakai member tetap dipertahankan."}

@@ -23,7 +23,7 @@ class AuthService:
                    COALESCE(m.role::text, u.role) AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
-                   u.avatar, u.is_superadmin, u.is_active, u.created_at
+                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE (u.student_id = :identifier OR u.email = :identifier) AND u.is_active = true
@@ -40,7 +40,7 @@ class AuthService:
                    COALESCE(m.role::text, u.role) AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
-                   u.avatar, u.is_superadmin, u.is_active, u.created_at
+                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE u.id = :user_id AND u.is_active = true
