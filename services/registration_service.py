@@ -66,13 +66,13 @@ class RegistrationService:
             """
             INSERT INTO registrations (
                 id, student_id, full_name, program_of_study, email, contact_info,
-                intake_period, interest_track, motivation, photo, status, submit_date,
-                consent_given, consent_timestamp, created_at, updated_at
+                intake_period, interest_track, motivation, photo, cv_url, portfolio_url,
+                status, submit_date, consent_given, consent_timestamp, created_at, updated_at
             )
             VALUES (
                 :id, :student_id, :full_name, :program_of_study, :email, :contact_info,
-                :intake_period, :interest_track, :motivation, :photo, :status, :submit_date,
-                :consent_given, :consent_timestamp, NOW(), NOW()
+                :intake_period, :interest_track, :motivation, :photo, :cv_url, :portfolio_url,
+                :status, :submit_date, :consent_given, :consent_timestamp, NOW(), NOW()
             )
             RETURNING *
             """
@@ -88,6 +88,8 @@ class RegistrationService:
             "interest_track": tracks,
             "motivation": payload.get("motivation"),
             "photo": payload.get("photo"),
+            "cv_url": payload.get("cv_url"),
+            "portfolio_url": payload.get("portfolio_url"),
             "status": SelectionStatus.PENDING.value,
             "submit_date": submit_date,
             "consent_given": consent_given,
@@ -123,8 +125,9 @@ class RegistrationService:
         """Fetch all registrations using raw SQL."""
         query_str = """
             SELECT id, student_id, full_name, program_of_study, email, contact_info,
-                   intake_period, interest_track, motivation, photo, status, member_id,
-                   review_note, submit_date, consent_given, consent_timestamp, created_at, updated_at
+                   intake_period, interest_track, motivation, photo, cv_url, portfolio_url,
+                   status, member_id, review_note, submit_date, consent_given, consent_timestamp,
+                   created_at, updated_at
             FROM registrations
             WHERE 1=1
         """
@@ -317,9 +320,11 @@ class RegistrationService:
                 detail="Pendaftaran yang sudah diterima tidak dapat dihapus dari modul seleksi.",
             )
 
-        # Unlink physical photo file if stored locally
+        # Unlink physical photo & CV files if stored locally (Right to Erasure)
         if reg.get("photo"):
             StorageService().delete_avatar(reg["photo"])
+        if reg.get("cv_url"):
+            StorageService().delete_cv(reg["cv_url"])
 
         stmt = text("DELETE FROM registrations WHERE id = :id")
         await self.session.execute(stmt, {"id": reg["id"]})
@@ -340,7 +345,7 @@ class RegistrationService:
         return True
 
     async def bulk_delete_registrations(self, identifiers: list[str], actor: dict | None = None) -> int:
-        """Bulk hard delete registrations and unlink physical photos (Right to Erasure)."""
+        """Bulk hard delete registrations and unlink physical photos & CVs (Right to Erasure)."""
         if not identifiers:
             return 0
 
@@ -365,7 +370,7 @@ class RegistrationService:
             return 0
 
         where_clause = " OR ".join(conditions)
-        fetch_stmt = text(f"SELECT id, student_id, photo FROM registrations WHERE {where_clause}")
+        fetch_stmt = text(f"SELECT id, student_id, photo, cv_url FROM registrations WHERE {where_clause}")
         res = await self.session.execute(fetch_stmt, params)
         rows = res.mappings().all()
 
@@ -384,6 +389,8 @@ class RegistrationService:
         for row in rows:
             if row.get("photo"):
                 storage_service.delete_avatar(row["photo"])
+            if row.get("cv_url"):
+                storage_service.delete_cv(row["cv_url"])
             deleted_ids.append(row["id"])
             deleted_student_ids.append(row["student_id"])
 

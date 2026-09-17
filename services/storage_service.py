@@ -11,6 +11,7 @@ from config.config import settings
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
 MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # 2MB per UU PDP / GDPR guideline
+MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5MB for CV PDF
 
 
 def validate_image_magic_bytes(header: bytes) -> str:
@@ -35,15 +36,26 @@ def validate_image_magic_bytes(header: bytes) -> str:
     )
 
 
+def validate_pdf_magic_bytes(header: bytes) -> None:
+    """Validate PDF magic bytes (%PDF-)."""
+    if len(header) < 5 or not header.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Berkas bukan merupakan dokumen PDF yang valid (Magic Bytes mismatch). Harap unggah dokumen PDF asli.",
+        )
+
+
 class StorageService:
     def __init__(self, base_upload_dir: str | None = None):
         self.base_dir = Path(base_upload_dir or settings.UPLOAD_DIR).resolve()
         self.avatars_dir = self.base_dir / "avatars"
+        self.cvs_dir = self.base_dir / "cvs"
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
         """Create storage directories if they do not exist."""
         self.avatars_dir.mkdir(parents=True, exist_ok=True)
+        self.cvs_dir.mkdir(parents=True, exist_ok=True)
 
     def process_and_save_avatar(self, file_stream: BinaryIO, content_type: str | None = None) -> str:
         """
@@ -164,6 +176,90 @@ class StorageService:
 
         filename = Path(relative_or_filename).name
         file_path = self.get_avatar_full_path(filename)
+
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+                return True
+            except OSError:
+                return False
+        return False
+
+    def process_and_save_cv(self, file_stream: BinaryIO, content_type: str | None = None) -> str:
+        """
+        Validate, sanitize, and save candidate CV PDF securely.
+        Returns the relative path: 'cvs/<uuid4>.pdf'
+        """
+        file_stream.seek(0, os.SEEK_END)
+        size = file_stream.tell()
+        file_stream.seek(0)
+
+        if size > MAX_CV_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ukuran berkas CV terlalu besar ({size / 1024 / 1024:.2f}MB). Maksimal 5MB.",
+            )
+
+        if size == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Berkas CV tidak boleh kosong.",
+            )
+
+        # Magic Bytes Validation for PDF
+        header = file_stream.read(16)
+        file_stream.seek(0)
+        validate_pdf_magic_bytes(header)
+
+        file_uuid = uuid.uuid4()
+        filename = f"{file_uuid}.pdf"
+        relative_path = f"cvs/{filename}"
+        target_path = self.cvs_dir / filename
+
+        with open(target_path, "wb") as f:
+            while chunk := file_stream.read(65536):
+                f.write(chunk)
+
+        return relative_path
+
+    async def save_upload_cv(self, upload_file: UploadFile) -> str:
+        """Process and save an uploaded CV PDF UploadFile."""
+        ct = (upload_file.content_type or "").lower()
+        fn = (upload_file.filename or "").lower()
+        if ct not in ("application/pdf", "application/x-pdf") and not fn.endswith(".pdf"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Format berkas CV harus berupa dokumen PDF (.pdf).",
+            )
+        return self.process_and_save_cv(upload_file.file, upload_file.content_type)
+
+    def get_cv_full_path(self, filename: str) -> Path | None:
+        """Resolve full filesystem path for a given CV filename safely against path traversal."""
+        safe_filename = Path(filename).name
+        file_path = (self.cvs_dir / safe_filename).resolve()
+
+        try:
+            file_path.relative_to(self.cvs_dir.resolve())
+        except ValueError:
+            return None
+
+        if file_path.exists() and file_path.is_file():
+            return file_path
+        return None
+
+    def delete_cv(self, relative_or_filename: str | None) -> bool:
+        """
+        Hard delete (Right to Erasure) physical CV file from storage.
+        Accepts 'cvs/uuid.pdf' or 'uuid.pdf' or full path.
+        """
+        if not relative_or_filename:
+            return False
+
+        if relative_or_filename.startswith(("http://", "https://")):
+            return False
+
+        filename = Path(relative_or_filename).name
+        file_path = self.get_cv_full_path(filename)
 
         if file_path and file_path.exists():
             try:

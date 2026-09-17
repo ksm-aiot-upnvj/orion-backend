@@ -28,6 +28,8 @@ class Registration(Base):
     )
     motivation = Column(Text, nullable=True)
     photo = Column(String(255), nullable=True)  # Stores relative path 'avatars/<uuid4>.webp'
+    cv_url = Column(String(255), nullable=True)  # Stores relative path 'cvs/<uuid4>.pdf'
+    portfolio_url = Column(String(500), nullable=True)  # Stores portfolio/GitHub link
     status = Column(
         PgEnum(SelectionStatus, name="selection_status_enum", values_callable=lambda obj: [e.value for e in obj], create_type=False),
         default=SelectionStatus.PENDING,

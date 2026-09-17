@@ -17,6 +17,8 @@ class RegistrationCreate(BaseModel):
     interest_track: list[ResearchField] = [ResearchField.AI]
     motivation: str | None = None
     photo: str | None = None
+    cv_url: str | None = None
+    portfolio_url: str | None = None
     consent_given: bool = True
 
     @field_validator("motivation")
@@ -95,6 +97,8 @@ class RegistrationResponse(BaseModel):
     interest_track: list[ResearchField] | None = None
     motivation: str | None = None
     photo: str | None = None
+    cv_url: str | None = None
+    portfolio_url: str | None = None
     status: SelectionStatus
     member_id: str | None = None
     review_note: str | None = None

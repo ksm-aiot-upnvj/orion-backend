@@ -51,3 +51,38 @@ async def test_upload_avatar_invalid_file_type():
         files = {"file": ("test.txt", b"not an image", "text/plain")}
         response = await ac.post("/orion/api/v1/uploads/avatar", files=files)
         assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_cv_valid_pdf_and_serve():
+    fake_pdf = b"%PDF-1.4\n%test pdf content\n%%EOF"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        files = {"file": ("cv_sample.pdf", fake_pdf, "application/pdf")}
+        response = await ac.post("/orion/api/v1/uploads/cv", files=files)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "filename" in data
+        assert data["filename"].endswith(".pdf")
+        assert "path" in data
+        assert data["path"].startswith("cvs/")
+
+        # Test serving CV via /uploads/cvs and direct /cvs route
+        filename = data["filename"]
+        serve_res = await ac.get(f"/orion/api/v1/uploads/cvs/{filename}")
+        assert serve_res.status_code == 200
+        assert serve_res.headers["content-type"] == "application/pdf"
+        assert "inline" in serve_res.headers.get("content-disposition", "")
+
+        direct_res = await ac.get(f"/orion/api/v1/cvs/{filename}")
+        assert direct_res.status_code == 200
+        assert direct_res.headers["content-type"] == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_upload_cv_invalid_file_type():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        files = {"file": ("cv.docx", b"PK fake docx content", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        response = await ac.post("/orion/api/v1/uploads/cv", files=files)
+        assert response.status_code == 400
+

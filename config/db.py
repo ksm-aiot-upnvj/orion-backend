@@ -82,4 +82,14 @@ async def ensure_enums_and_tables(connection):
     from sqlalchemy import text
     await connection.execute(text(ENUM_DEFINITIONS_SQL))
     await connection.run_sync(Base.metadata.create_all)
+    await connection.execute(text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='registrations' AND column_name='cv_url') THEN
+                ALTER TABLE registrations ADD COLUMN cv_url VARCHAR(255);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='registrations' AND column_name='portfolio_url') THEN
+                ALTER TABLE registrations ADD COLUMN portfolio_url VARCHAR(500);
+            END IF;
+        END $$;
+    """))
 
