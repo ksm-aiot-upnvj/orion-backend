@@ -33,7 +33,7 @@ async def upload_avatar(
         "filename": filename,
         "path": relative_path,
         "url": f"/orion/api/v1/uploads/avatars/{filename}",
-        "message": "Citra berhasil divalidasi (magic bytes), dibersihkan dari metadata EXIF, dan disimpan dalam format WebP teroptimasi.",
+        "message": "Foto berhasil diunggah dan diproses.",
     }
 
 
@@ -47,7 +47,7 @@ async def serve_avatar(filename: str):
     if not file_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File citra tidak ditemukan atau telah dihapus.",
+            detail="File foto tidak ditemukan atau telah dihapus.",
         )
 
     return FileResponse(
@@ -88,7 +88,7 @@ async def delete_avatar(
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File citra tidak ditemukan di storage fisik.",
+            detail="File foto tidak ditemukan di storage fisik.",
         )
 
     return {
@@ -117,7 +117,7 @@ async def upload_cv(
         "filename": filename,
         "path": relative_path,
         "url": f"/orion/api/v1/uploads/cvs/{filename}",
-        "message": "Berkas CV berhasil divalidasi (PDF magic bytes) dan disimpan dengan aman.",
+        "message": "Berkas CV berhasil diunggah dan diproses.",
     }
 
 
@@ -163,5 +163,5 @@ async def delete_cv(
 
     return {
         "status": "success",
-        "message": f"Berkas CV {filename} telah dihapus permanen dari storage fisik sesuai prinsip Right to Erasure.",
+        "message": f"Berkas CV {filename} telah dihapus permanen dari server.",
     }
