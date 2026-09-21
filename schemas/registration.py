@@ -28,13 +28,9 @@ class RegistrationCreate(BaseModel):
             return v
         import re
         text_clean = v.strip()
-        # Count sentences: split by ., !, ?
-        sentences = [s.strip() for s in re.split(r"[.!?]+", text_clean) if s.strip()]
-        if len(sentences) > 3:
-            raise ValueError("Teks motivasi maksimal terdiri dari 3 kalimat.")
         words = [w for w in text_clean.split() if w.strip()]
-        if len(words) > 100:
-            raise ValueError("Teks motivasi maksimal terdiri dari 100 kata.")
+        if len(words) > 150:
+            raise ValueError("Teks motivasi maksimal terdiri dari 150 kata.")
         return v
 
     @field_validator("interest_track", mode="before")
