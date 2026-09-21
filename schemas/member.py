@@ -110,6 +110,17 @@ class MemberResponse(MemberBase):
     user_is_active: bool | None = None
 
 
+class PublicOrganizationMember(BaseModel):
+    """Safe public projection used by the organization profile tree."""
+
+    member_id: str
+    full_name: str
+    program_of_study: StudyProgram
+    division: Division | None = None
+    role: MemberRole
+    avatar: str | None = None
+
+
 class GrantERPAccessRequest(BaseModel):
     password: str
     role: str = "PENGURUS"

@@ -159,6 +159,23 @@ class MemberService:
             "alumni_count": row["alumni_count"] if row else 0,
         }
 
+    async def get_public_organization_members(self) -> list[dict]:
+        """Return only active, non-sensitive fields for the public organization tree."""
+        stmt = text(
+            """
+            SELECT member_id, full_name, program_of_study, division, role,
+                   avatar
+            FROM members
+            WHERE status = :status AND role <> :member_role
+            ORDER BY division NULLS FIRST, role, full_name
+            """
+        )
+        result = await self.session.execute(
+            stmt,
+            {"status": MemberStatus.AKTIF.value, "member_role": MemberRole.ANGGOTA.value},
+        )
+        return [dict(row) for row in result.mappings().all()]
+
     async def create_member(self, member_data: dict, actor: dict | None = None) -> dict:
         """Insert or update member using raw SQL RETURNING * with sanitization and audit logging."""
         # Sanitize text fields to prevent injection
@@ -360,6 +377,9 @@ class MemberService:
         params = {"id": existing["id"]}
 
         for k, v in update_data.items():
+            if k == "division" and v is None:
+                fields.append("division = NULL")
+                continue
             if v is not None:
                 if k == "program_of_study":
                     fields.append("program_of_study = :program_of_study")

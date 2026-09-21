@@ -10,6 +10,7 @@ from schemas.member import (
     MemberCreate,
     MemberResponse,
     MemberUpdate,
+    PublicOrganizationMember,
     ResetMemberPasswordRequest,
 )
 from services.member_service import MemberService
@@ -87,6 +88,16 @@ async def get_members_count(
     """
     service = MemberService(db)
     return await service.get_public_stats()
+
+
+@router.get("/public/organization", response_model=list[PublicOrganizationMember])
+async def get_public_organization_members(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the minimum safe member projection needed for the public organization tree."""
+    service = MemberService(db)
+    members = await service.get_public_organization_members()
+    return [PublicOrganizationMember.model_validate(member) for member in members]
 
 
 @router.get("/{identifier}", response_model=MemberResponse)
