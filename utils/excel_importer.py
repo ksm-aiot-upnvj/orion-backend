@@ -94,7 +94,7 @@ class ExcelMemberImporter:
 
             # Standardize prodi
             raw_prodi = clean_val(row_dict.get("Program Studi")) or ""
-            if "Sains Data" in raw_prodi or "10513" in student_id:
+            if "Sains Data" in raw_prodi or "10514" in student_id:
                 prodi = StudyProgram.S1_SAINS_DATA.value
             elif "D3" in raw_prodi or "00511" in student_id:
                 prodi = StudyProgram.D3_SISTEM_INFORMASI.value
