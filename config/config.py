@@ -7,6 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("orion.config")
 
+# Public development default; the app refuses to start in production with it (see validate_production_security)
+DEV_DEFAULT_JWT_SECRET = "orion-secret-key-ksm-aiot-upnvj-2026-supersecure-enterprise-jwt"
+MIN_JWT_SECRET_LENGTH = 32
+ALLOWED_JWT_ALGORITHMS = ("HS256", "HS384", "HS512")
+
 
 def get_pyproject_version() -> str:
     """Dynamically read project version from pyproject.toml."""
@@ -53,10 +58,7 @@ class Settings(BaseSettings):
     IMPORT_DEFAULT_PASSWORD: str | None = Field(default=None, validation_alias="IMPORT_DEFAULT_PASSWORD")
 
     # Security & Tokens: Short-lived access tokens (30 mins) + 7 days refresh
-    SECRET_KEY: str = Field(
-        default="orion-secret-key-ksm-aiot-upnvj-2026-supersecure-enterprise-jwt",
-        validation_alias="JWT_SECRET",
-    )
+    SECRET_KEY: str = Field(default=DEV_DEFAULT_JWT_SECRET, validation_alias="JWT_SECRET")
     ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, validation_alias="REFRESH_TOKEN_EXPIRE_DAYS")
@@ -78,7 +80,8 @@ class Settings(BaseSettings):
         default=r"^https:\/\/.*\.trycloudflare\.com$",
         validation_alias="CORS_ORIGIN_REGEX",
     )
-    DEBUG: bool = Field(default=True, validation_alias="DEBUG")
+    # Off unless explicitly enabled: DEBUG exposes exception details in API errors and runs the dev seeder
+    DEBUG: bool = Field(default=False, validation_alias="DEBUG")
     LOG_LEVEL: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
     @property
@@ -132,6 +135,13 @@ class Settings(BaseSettings):
             return None
         return self.CORS_ORIGIN_REGEX
 
+    @field_validator("ALGORITHM")
+    def validate_jwt_algorithm(cls, v):
+        # An env value like "none" would make PyJWT accept unsigned tokens
+        if v not in ALLOWED_JWT_ALGORITHMS:
+            raise ValueError(f"JWT_ALGORITHM must be one of {', '.join(ALLOWED_JWT_ALGORITHMS)}")
+        return v
+
     @field_validator("SUPERADMIN_NIM", "SUPERADMIN_NAME", "SUPERADMIN_EMAIL", "SUPERADMIN_PW")
     def validate_superadmin_fields(cls, v):
         if not v:
@@ -139,7 +149,19 @@ class Settings(BaseSettings):
         return v
 
 
-settings = Settings()
+def validate_production_security(cfg: Settings) -> None:
+    """Fail closed on insecure production configuration instead of only logging a warning."""
+    if cfg.ENVIRONMENT.lower() != "production":
+        return
+    if cfg.SECRET_KEY == DEV_DEFAULT_JWT_SECRET or len(cfg.SECRET_KEY) < MIN_JWT_SECRET_LENGTH:
+        raise RuntimeError(
+            "JWT_SECRET must be set to a random value of at least "
+            f"{MIN_JWT_SECRET_LENGTH} characters in production (generate with: openssl rand -hex 32)."
+        )
+    if cfg.DEBUG:
+        logger.warning("DEBUG=True is ignored in production (it would expose exception details).")
+        cfg.DEBUG = False
 
-if settings.ENVIRONMENT.lower() == "production" and "supersecure" in settings.SECRET_KEY:
-    logger.warning("PERINGATAN KEAMANAN: SECRET_KEY masih menggunakan default nilai development pada production!")
+
+settings = Settings()
+validate_production_security(settings)

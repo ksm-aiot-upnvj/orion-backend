@@ -108,10 +108,10 @@ uv run uvicorn main:app --reload --port 8000
 
 ---
 
-## 🔑 Akun Uji Coba Pengurus (Development)
-Saat backend berjalan pada `ENVIRONMENT=development`, Anda dapat langsung login menggunakan akun pengurus:
-- **NIM / User ID:** `2210511084` (Dzulfikri Adjmal - Ketua / Super Admin)
-- **Password:** `aiotupnvj2026`
+## 🔑 Akun Superadmin (Development)
+Akun superadmin dibuat dari variabel `SUPERADMIN_NIM`, `SUPERADMIN_NAME`, `SUPERADMIN_EMAIL`, dan `SUPERADMIN_PW` di `.env`.
+Seeder hanya berjalan bila `DEBUG=True` (default `False`), jadi aktifkan di `.env` lokal Anda. Jangan menaruh kredensial
+nyata di dokumentasi atau kode.
 
 ---
 
