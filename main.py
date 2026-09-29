@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,11 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.config import settings
 from config.db import AsyncSessionLocal, engine, ensure_enums_and_tables, get_db
 from routes.auth_routes import router as auth_router
+from routes.legacy_routes import router as legacy_router
+from routes.log_routes import router as log_router
 from routes.member_routes import router as member_router
 from routes.registration_routes import router as registration_router
-from routes.legacy_routes import router as legacy_router
 from routes.upload_routes import router as upload_router
-from routes.log_routes import router as log_router
 from services.storage_service import StorageService
 from utils.seed import seed_database
 
