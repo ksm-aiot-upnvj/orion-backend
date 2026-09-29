@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from models.enums import Division, MemberRole, ResearchField, SelectionStatus, StudyProgram
 from schemas.member import SafeLink
@@ -67,10 +67,21 @@ class IntakeStatusResponse(BaseModel):
 
 
 class IntakeStatusUpdate(BaseModel):
-    status: str  # OPEN or CLOSED
-    batch_name: str
-    deadline: str  # YYYY-MM-DD
-    quota: int = 100
+    status: Literal["OPEN", "CLOSED"]
+    batch_name: str = Field(min_length=1, max_length=200)
+    deadline: str  # YYYY-MM-DD, calendar date in WIB
+    quota: int = Field(default=100, ge=0, le=100_000)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Any) -> Any:
+        return v.strip().upper() if isinstance(v, str) else v
+
+    @field_validator("deadline")
+    @classmethod
+    def validate_deadline(cls, v: str) -> str:
+        # A malformed deadline used to be stored and then silently ignored at submission time
+        return date.fromisoformat(v.strip()[:10]).isoformat()
 
 
 class RegistrationReview(BaseModel):

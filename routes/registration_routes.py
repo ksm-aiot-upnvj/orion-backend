@@ -1,5 +1,6 @@
 import json
-from datetime import UTC, datetime
+import logging
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
@@ -23,6 +24,24 @@ from utils.rate_limiter import rate_limit
 from utils.uuid_utils import generate_uuid7
 
 router = APIRouter(prefix="/registrations", tags=["Registrations (Recruitment)"])
+logger = logging.getLogger("orion.registrations")
+
+# Registration deadlines are calendar dates in Indonesia (WIB, UTC+7, no DST)
+WIB = timezone(timedelta(hours=7), "WIB")
+
+
+async def _load_intake_config(db: AsyncSession) -> tuple[dict, dict | None]:
+    """Return (config dict, settings row). Raises ValueError when the stored JSON is corrupt."""
+    res = await db.execute(
+        text("SELECT id, key, value, updated_at, updated_by FROM system_settings WHERE key = 'intake_config'")
+    )
+    row = res.mappings().first()
+    if not row:
+        return {}, None
+    cfg = json.loads(row["value"])
+    if not isinstance(cfg, dict):
+        raise ValueError("intake_config is not a JSON object")  # noqa: TRY004 - one error type for "corrupt config"
+    return cfg, row
 
 
 @router.get("/intake-status", response_model=IntakeStatusResponse)
@@ -31,27 +50,18 @@ async def get_intake_status(db: AsyncSession = Depends(get_db)):
     Public endpoint: Get active recruitment intake configuration from database.
     Used by registration portal and admin selection dashboard.
     """
-    stmt = text("SELECT id, key, value, updated_at, updated_by FROM system_settings WHERE key = 'intake_config'")
-    res = await db.execute(stmt)
-    row = res.mappings().first()
-    if not row:
-        return IntakeStatusResponse(
-            status="OPEN",
-            batch_name="Penerimaan Anggota Baru Periode 2026",
-            deadline="2026-08-31",
-            quota=100,
-        )
     try:
-        val = json.loads(row["value"])
-    except Exception:
-        val = {}
+        val, row = await _load_intake_config(db)
+    except ValueError:
+        logger.exception("Corrupt intake_config in system_settings")
+        val, row = {"status": "CLOSED"}, None
     return IntakeStatusResponse(
         status=val.get("status", "OPEN"),
         batch_name=val.get("batch_name", "Penerimaan Anggota Baru Periode 2026"),
         deadline=val.get("deadline", "2026-08-31"),
         quota=int(val.get("quota", 100)),
-        updated_at=row["updated_at"],
-        updated_by=row["updated_by"],
+        updated_at=row["updated_at"] if row else None,
+        updated_by=row["updated_by"] if row else None,
     )
 
 
@@ -66,9 +76,9 @@ async def update_intake_status(
     Enforced RBAC: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
     """
     val_str = json.dumps({
-        "status": payload.status.upper(),
+        "status": payload.status,
         "batch_name": payload.batch_name.strip(),
-        "deadline": payload.deadline.strip(),
+        "deadline": payload.deadline,
         "quota": payload.quota,
     }, ensure_ascii=False)
 
@@ -115,30 +125,28 @@ async def submit_registration(
     """
     Public endpoint: Submit candidate registration with server-side intake status & deadline enforcement.
     """
-    # 1. Enforce intake status & deadline from database
-    stmt = text("SELECT value FROM system_settings WHERE key = 'intake_config'")
-    res = await db.execute(stmt)
-    row = res.mappings().first()
-    if row:
-        try:
-            cfg = json.loads(row["value"])
-            if cfg.get("status") == "CLOSED":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Pendaftaran calon anggota KSM AIoT periode ini telah ditutup oleh panitia.",
-                )
-            deadline_str = cfg.get("deadline")
-            if deadline_str:
-                deadline_date = datetime.strptime(deadline_str[:10], "%Y-%m-%d").date()
-                if datetime.now(UTC).date() > deadline_date:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Batas waktu pendaftaran (deadline) untuk periode ini telah berakhir.",
-                    )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    # 1. Enforce intake status & deadline from database. Fail closed: an unreadable config must not
+    #    silently disable the deadline (previously any parse error was swallowed and submissions accepted).
+    try:
+        cfg, _ = await _load_intake_config(db)
+        deadline_str = cfg.get("deadline")
+        deadline_date = date.fromisoformat(str(deadline_str)[:10]) if deadline_str else None
+    except ValueError:
+        logger.exception("Corrupt intake_config; rejecting registrations until it is fixed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Konfigurasi pendaftaran sedang bermasalah. Silakan hubungi panitia.",
+        ) from None
+    if str(cfg.get("status", "OPEN")).upper() == "CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Pendaftaran calon anggota KSM AIoT periode ini telah ditutup oleh panitia.",
+        )
+    if deadline_date and datetime.now(WIB).date() > deadline_date:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Batas waktu pendaftaran (deadline) untuk periode ini telah berakhir.",
+        )
 
     client_ip = get_client_ip(request)
     user_agent = request.headers.get("User-Agent", "Unknown")
