@@ -9,3 +9,7 @@ pip-delete-this-directory.txt
 .env
 *.db
 .pytest_cache
+
+# Uploaded personal data (photos, CVs) must never be baked into the image
+uploads/
+tests/

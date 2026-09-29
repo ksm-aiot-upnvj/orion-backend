@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+# Drop root: fix ownership of the (possibly pre-existing) uploads volume, then re-exec as "orion"
+if [ "$(id -u)" = "0" ] && id orion >/dev/null 2>&1; then
+    mkdir -p /app/uploads
+    chown -R orion:orion /app/uploads
+    exec setpriv --reuid=orion --regid=orion --init-groups "$0" "$@"
+fi
+
 echo "Waiting for PostgreSQL database..."
 until python - <<EOF
 import asyncpg, asyncio, os
