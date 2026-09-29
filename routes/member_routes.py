@@ -20,7 +20,7 @@ from utils.excel_importer import ExcelMemberImporter
 router = APIRouter(prefix="/members", tags=["Members & Alumni"])
 
 
-@router.get("/", response_model=list[MemberResponse])
+@router.get("", response_model=list[MemberResponse])
 async def list_members(
     division: str | None = None,
     intake_period: str | None = None,
@@ -64,7 +64,7 @@ async def update_alumni_profile(
     return AlumniProfileResponse.model_validate(profile)
 
 
-@router.post("/", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
 async def create_member(
     payload: MemberCreate,
     db: AsyncSession = Depends(get_db),
@@ -79,7 +79,7 @@ async def create_member(
     return MemberResponse.model_validate(member)
 
 
-@router.get("/count")
+@router.get("/stats")
 async def get_members_count(
     db: AsyncSession = Depends(get_db),
 ):
@@ -90,7 +90,7 @@ async def get_members_count(
     return await service.get_public_stats()
 
 
-@router.get("/public/organization", response_model=list[PublicOrganizationMember])
+@router.get("/public", response_model=list[PublicOrganizationMember])
 async def get_public_organization_members(
     db: AsyncSession = Depends(get_db),
 ):
@@ -166,7 +166,7 @@ async def delete_member(
     return {"status": "success", "message": f"Anggota {identifier} berhasil dihapus permanen"}
 
 
-@router.post("/import-excel")
+@router.post("/imports")
 async def import_members_excel(
     file: UploadFile = File(...),
     sheet_name: str = "Database Anggota",
@@ -224,7 +224,8 @@ async def revoke_erp_access(
     return await service.revoke_erp_access(identifier=identifier, actor=current_user)
 
 
-@router.post("/{identifier}/reset-password")
+@router.put("/{identifier}/password")
+@router.post("/{identifier}/password", include_in_schema=False)  # target of the 308 from the legacy POST URL
 async def reset_erp_password(
     identifier: str,
     payload: ResetMemberPasswordRequest,

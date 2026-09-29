@@ -40,7 +40,7 @@ async def test_registrations_crud_and_consent():
         import random
         candidate_nim = f"24{random.randint(10000000, 99999999)}"
         bad_submit_res = await ac.post(
-            "/orion/api/v1/registrations/",
+            "/orion/api/v1/registrations",
             json={
                 "student_id": candidate_nim,
                 "full_name": "Calon Anggota Exceeded",
@@ -57,7 +57,7 @@ async def test_registrations_crud_and_consent():
         # 4. Public submission of registration with valid motivation (< 3 sentences, < 100 words)
         candidate_nim_valid = f"24{random.randint(10000000, 99999999)}"
         submit_res = await ac.post(
-            "/orion/api/v1/registrations/",
+            "/orion/api/v1/registrations",
             json={
                 "student_id": candidate_nim_valid,
                 "full_name": "Calon Anggota Consent Test",
@@ -76,7 +76,7 @@ async def test_registrations_crud_and_consent():
 
         # 5. GET /orion/api/v1/registrations/ (must succeed without UndefinedColumnError)
         list_res = await ac.get(
-            "/orion/api/v1/registrations/",
+            "/orion/api/v1/registrations",
             headers=headers,
         )
         assert list_res.status_code == 200

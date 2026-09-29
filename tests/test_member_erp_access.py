@@ -32,7 +32,7 @@ async def test_member_erp_access_lifecycle():
             "erp_password": "InitialPassword#2026!",
             "erp_role": "PENGURUS",
         }
-        create_res = await ac.post("/orion/api/v1/members/", json=new_member_payload, headers=headers)
+        create_res = await ac.post("/orion/api/v1/members", json=new_member_payload, headers=headers)
         assert create_res.status_code == 201
         created_data = create_res.json()
         assert created_data["has_erp_access"] is True

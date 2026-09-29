@@ -39,7 +39,7 @@ async def test_ensure_tables_and_rbac():
 
         # Create a test member
         create_res = await ac.post(
-            "/orion/api/v1/members/",
+            "/orion/api/v1/members",
             headers=headers,
             json={
                 "student_id": "2410511999",

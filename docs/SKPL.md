@@ -113,11 +113,11 @@ flowchart LR
 **Acceptance criteria:**
 
 - Sistem menampilkan informasi visi, struktur, divisi, dan showcase proyek yang berasal dari data frontend.
-- Sistem mengambil statistik anggota melalui `GET /members/count` tanpa login.
+- Sistem mengambil statistik anggota melalui `GET /members/stats` tanpa login.
 - Jika API statistik gagal, UI tetap dapat menampilkan halaman publik dan menangani kondisi error.
 - Tombol akses pengurus mengarahkan pengguna ke alur login.
 
-**API terkait:** `GET /members/count`.
+**API terkait:** `GET /members/stats`.
 
 ### UC-02 - Autentikasi pengurus
 
@@ -160,10 +160,10 @@ sequenceDiagram
 
 - `GET /auth/me` menampilkan profil sesi aktif.
 - `PUT /auth/me` memperbarui nama lengkap, email, atau avatar sesuai schema.
-- `POST /auth/change-password` hanya berhasil setelah password lama terverifikasi.
+- `PUT /auth/me/password` hanya berhasil setelah password lama terverifikasi.
 - Semua operasi memerlukan JWT dan hanya berlaku untuk akun aktif.
 
-**API terkait:** `GET/PUT /auth/me`, `POST /auth/change-password`.
+**API terkait:** `GET/PUT /auth/me`, `PUT /auth/me/password`.
 
 ### UC-04 - Konfigurasi intake pendaftaran
 
@@ -186,7 +186,7 @@ sequenceDiagram
 **Acceptance criteria:**
 
 - Form melakukan validasi client-side dan backend melakukan validasi ulang.
-- Pengiriman dilakukan ke `POST /registrations/` tanpa login.
+- Pengiriman dilakukan ke `POST /registrations` tanpa login.
 - Endpoint dibatasi 10 permintaan per menit per IP.
 - Backend memeriksa status intake dan deadline dari database sebelum membuat data.
 - Data pendaftaran tersimpan dan dapat ditinjau pengurus.
@@ -204,7 +204,7 @@ sequenceDiagram
     Applicant->>UI: Isi formulir dan pilih file
     UI->>API: GET /registrations/intake-status
     API-->>UI: Status, deadline, kuota
-    UI->>API: POST /uploads/avatar (opsional)
+    UI->>API: POST /uploads/avatars (opsional)
     API-->>UI: Nama/path avatar WebP
     UI->>API: POST /registrations/
     API->>DB: Validasi intake dan simpan registration
@@ -220,7 +220,7 @@ sequenceDiagram
 
 **Acceptance criteria:**
 
-- Pengurus dapat melihat daftar atau detail pendaftaran melalui `GET /registrations/` dan `GET /registrations/{identifier}`.
+- Pengurus dapat melihat daftar atau detail pendaftaran melalui `GET /registrations` dan `GET /registrations/{identifier}`.
 - PSDM, Ketua, Wakil Ketua, atau Superadmin dapat approve/reject.
 - Approval membuat atau memperbarui member dan menerbitkan Member ID berurutan dengan pola `AIOT-YYYY-NNN`.
 - Reviewer dapat menetapkan divisi dan role pada proses approval.
@@ -234,7 +234,7 @@ sequenceDiagram
 
 **Acceptance criteria:**
 
-- Pengurus dapat memfilter daftar anggota berdasarkan division, intake period, dan status melalui `GET /members/`.
+- Pengurus dapat memfilter daftar anggota berdasarkan division, intake period, dan status melalui `GET /members`.
 - Pengurus dapat mengambil anggota berdasarkan UUID, Member ID, atau NIM.
 - PSDM/pimpinan/Superadmin dapat membuat, memperbarui, dan menghapus anggota.
 - Sistem menyediakan anonimisasi yang menghapus PII/avatar, menonaktifkan akses ERP, dan mempertahankan integritas relasi.
@@ -242,7 +242,7 @@ sequenceDiagram
 - Profil alumni dapat dibaca pengurus dan di-upsert hanya untuk anggota berstatus `Alumni` melalui endpoint alumni-profile.
 - Frontend saat ini masih memiliki fallback/dummy alumni data; data tersebut bukan bukti bahwa seluruh grid alumni sudah terhubung ke API.
 
-**API terkait:** `GET /members/count`, CRUD `/members`, `POST /members/{identifier}/anonymize`, alumni-profile endpoints.
+**API terkait:** `GET /members/stats`, CRUD `/members`, `POST /members/{identifier}/anonymize`, alumni-profile endpoints.
 
 ### UC-08 - Akses ERP dan import anggota
 
@@ -253,8 +253,8 @@ sequenceDiagram
 
 - `POST /members/{identifier}/access` membuat atau mengaktifkan akses ERP dengan role dan password.
 - `DELETE /members/{identifier}/access` menonaktifkan akses ERP.
-- `POST /members/{identifier}/reset-password` mengganti password ERP.
-- `POST /members/import-excel` hanya menerima `.xlsx` atau `.xls`, menggunakan sheet default `Database Anggota`, lalu mengimpor data ke database.
+- `PUT /members/{identifier}/password` mengganti password ERP.
+- `POST /members/imports` hanya menerima `.xlsx` atau `.xls`, menggunakan sheet default `Database Anggota`, lalu mengimpor data ke database.
 - Operasi yang gagal mengembalikan error HTTP yang dapat ditangani UI.
 
 ### UC-09 - Avatar dan penyimpanan file
@@ -264,10 +264,10 @@ sequenceDiagram
 
 **Acceptance criteria:**
 
-- `POST /uploads/avatar` memvalidasi MIME dan magic bytes.
+- `POST /uploads/avatars` memvalidasi MIME dan magic bytes.
 - Ukuran maksimum default adalah 2 MiB; gambar dibersihkan dari EXIF dan dikonversi ke WebP.
 - Nama file menggunakan UUID dan akses file melindungi dari path traversal.
-- `GET /uploads/avatars/{filename}` dan alias `/avatars/{filename}` melayani file yang disanitasi.
+- `GET /uploads/avatars/{filename}` melayani file yang disanitasi.
 - Penghapusan avatar hanya untuk Superadmin atau Admin BPH.
 
 ### UC-10 - Inventory, finance, dan archive: UI saat ini
@@ -291,22 +291,22 @@ Semua endpoint di bawah tersedia pada prefix utama `/orion/api/v1`; backend juga
 
 | Area | Method dan path | Auth |
 |---|---|---|
-| Health | `GET /health`, `GET /db-test` | Publik |
+| Health | `GET /health`, `GET /health/db` | Publik |
 | Auth | `POST /auth/login` | Publik, rate limited |
-| Auth | `GET/PUT /auth/me`, `POST /auth/change-password`, `POST /auth/logout` | JWT |
+| Auth | `GET/PUT /auth/me`, `PUT /auth/me/password`, `POST /auth/logout` | JWT |
 | Intake | `GET /registrations/intake-status` | Publik |
 | Intake | `PUT /registrations/intake-status` | Selection manager |
-| Registrasi | `POST /registrations/` | Publik, rate limited |
-| Seleksi | `GET /registrations/`, `GET /registrations/{id}` | Pengurus |
+| Registrasi | `POST /registrations` | Publik, rate limited |
+| Seleksi | `GET /registrations`, `GET /registrations/{id}` | Pengurus |
 | Seleksi | `PATCH /registrations/{id}/approve`, `PATCH /registrations/{id}/reject` | Selection manager |
 | Seleksi | `POST /registrations/bulk-delete`, `DELETE /registrations/{id}` | Selection manager |
-| Anggota | `GET /members/`, `GET /members/count`, `GET /members/{id}` | Pengurus / count publik |
+| Anggota | `GET /members`, `GET /members/stats`, `GET /members/{id}` | Pengurus / count publik |
 | Anggota | `POST/PUT/DELETE /members...` | Member manager |
-| Anggota | `POST /members/import-excel` | Member manager |
-| ERP | `POST/DELETE /members/{id}/access`, `POST /members/{id}/reset-password` | Member manager |
+| Anggota | `POST /members/imports` | Member manager |
+| ERP | `POST/DELETE /members/{id}/access`, `PUT /members/{id}/password` | Member manager |
 | Alumni | `GET/PUT /members/{id}/alumni-profile` | Pengurus / member manager |
-| File | `POST /uploads/avatar` | Publik, rate limited |
-| File | `GET /uploads/avatars/{filename}`, `GET /avatars/{filename}` | Publik |
+| File | `POST /uploads/avatars` | Publik, rate limited |
+| File | `GET /uploads/avatars/{filename}` | Publik |
 | File | `DELETE /uploads/avatars/{filename}` | Superadmin/Admin BPH |
 
 ## 6. Kebutuhan Non-Fungsional

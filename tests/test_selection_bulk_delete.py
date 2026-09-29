@@ -42,7 +42,7 @@ async def test_bulk_delete_registrations():
 
         for nim in nims:
             res = await ac.post(
-                "/orion/api/v1/registrations/",
+                "/orion/api/v1/registrations",
                 json={
                     "student_id": nim,
                     "full_name": f"Candidate {nim}",

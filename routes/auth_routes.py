@@ -74,7 +74,8 @@ async def update_my_profile(
     return UserOut.model_validate(updated)
 
 
-@router.post("/change-password")
+@router.put("/me/password")
+@router.post("/me/password", include_in_schema=False)  # target of the 308 from the legacy POST URL
 async def change_password(
     payload: ChangePasswordRequest,
     db: AsyncSession = Depends(get_db),

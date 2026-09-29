@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
+from config.config import settings
 from services.storage_service import StorageService
 from utils.auth_deps import require_roles
 from utils.rate_limiter import rate_limit
@@ -12,7 +13,7 @@ storage_service = StorageService()
 
 
 @router.post(
-    "/avatar",
+    "/avatars",
     dependencies=[Depends(rate_limit(max_requests=10, window_seconds=60, scope="upload_avatar"))],
 )
 async def upload_avatar(
@@ -34,7 +35,7 @@ async def upload_avatar(
     return {
         "filename": filename,
         "path": relative_path,
-        "url": f"/orion/api/v1/uploads/tmp/avatars/{filename}",
+        "url": f"{settings.API_V1_STR.rstrip('/')}/uploads/tmp/avatars/{filename}",
         "message": "Foto berhasil diunggah dan diproses.",
     }
 
@@ -105,20 +106,6 @@ async def serve_staged_cv(filename: str):
     )
 
 
-# Direct alias router so /orion/api/v1/avatars/{filename} and /avatars/{filename} resolve directly
-direct_avatar_router = APIRouter(tags=["File Storage & Uploads"])
-
-
-@direct_avatar_router.get("/avatars/{filename}")
-async def serve_avatar_direct(filename: str):
-    return await serve_avatar(filename)
-
-
-@direct_avatar_router.get("/cvs/{filename}")
-async def serve_cv_direct(filename: str):
-    return await serve_cv(filename)
-
-
 @router.delete("/avatars/{filename}")
 async def delete_avatar(
     filename: str,
@@ -142,7 +129,7 @@ async def delete_avatar(
 
 
 @router.post(
-    "/cv",
+    "/cvs",
     dependencies=[Depends(rate_limit(max_requests=10, window_seconds=60, scope="upload_cv"))],
 )
 async def upload_cv(
@@ -161,7 +148,7 @@ async def upload_cv(
     return {
         "filename": filename,
         "path": relative_path,
-        "url": f"/orion/api/v1/uploads/tmp/cvs/{filename}",
+        "url": f"{settings.API_V1_STR.rstrip('/')}/uploads/tmp/cvs/{filename}",
         "message": "Berkas CV berhasil diunggah dan diproses.",
     }
 

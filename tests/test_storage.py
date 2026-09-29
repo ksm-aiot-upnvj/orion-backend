@@ -39,7 +39,7 @@ async def test_upload_avatar_exif_stripped_and_webp_converted():
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         files = {"file": ("test_avatar.jpg", img_bytes, "image/jpeg")}
-        response = await ac.post("/orion/api/v1/uploads/avatar", files=files)
+        response = await ac.post("/orion/api/v1/uploads/avatars", files=files)
 
         assert response.status_code == 200
         data = response.json()
@@ -57,14 +57,12 @@ async def test_upload_avatar_exif_stripped_and_webp_converted():
         serve_res = await ac.get(f"/orion/api/v1/uploads/avatars/{filename}")
         assert serve_res.status_code == 404
 
-        # After promotion it is served via both /uploads/avatars and direct /avatars route
+        # After promotion it is served from /uploads/avatars
         final_path = StorageService().promote_upload(data["path"], "avatars")
         assert final_path == f"avatars/{filename}"
         serve_res = await ac.get(f"/orion/api/v1/uploads/avatars/{filename}")
         assert serve_res.status_code == 200
         assert serve_res.headers["content-type"] == "image/webp"
-        direct_res = await ac.get(f"/orion/api/v1/avatars/{filename}")
-        assert direct_res.status_code == 200
 
         StorageService().delete_avatar(final_path)
 
@@ -73,7 +71,7 @@ async def test_upload_avatar_exif_stripped_and_webp_converted():
 async def test_upload_avatar_invalid_file_type():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         files = {"file": ("test.txt", b"not an image", "text/plain")}
-        response = await ac.post("/orion/api/v1/uploads/avatar", files=files)
+        response = await ac.post("/orion/api/v1/uploads/avatars", files=files)
         assert response.status_code == 400
 
 
@@ -82,7 +80,7 @@ async def test_upload_cv_valid_pdf_and_serve():
     fake_pdf = b"%PDF-1.4\n%test pdf content\n%%EOF"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         files = {"file": ("cv_sample.pdf", fake_pdf, "application/pdf")}
-        response = await ac.post("/orion/api/v1/uploads/cv", files=files)
+        response = await ac.post("/orion/api/v1/uploads/cvs", files=files)
 
         assert response.status_code == 200
         data = response.json()
@@ -100,9 +98,6 @@ async def test_upload_cv_valid_pdf_and_serve():
         assert serve_res.headers["content-type"] == "application/pdf"
         assert "inline" in serve_res.headers.get("content-disposition", "")
 
-        direct_res = await ac.get(f"/orion/api/v1/cvs/{filename}")
-        assert direct_res.status_code == 200
-        assert direct_res.headers["content-type"] == "application/pdf"
 
         StorageService().delete_cv(final_path)
 
@@ -111,7 +106,7 @@ async def test_upload_cv_valid_pdf_and_serve():
 async def test_upload_cv_invalid_file_type():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         files = {"file": ("cv.docx", b"PK fake docx content", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-        response = await ac.post("/orion/api/v1/uploads/cv", files=files)
+        response = await ac.post("/orion/api/v1/uploads/cvs", files=files)
         assert response.status_code == 400
 
 

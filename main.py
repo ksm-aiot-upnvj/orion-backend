@@ -16,7 +16,7 @@ from config.db import AsyncSessionLocal, engine, ensure_enums_and_tables, get_db
 from routes.auth_routes import router as auth_router
 from routes.member_routes import router as member_router
 from routes.registration_routes import router as registration_router
-from routes.upload_routes import direct_avatar_router
+from routes.legacy_routes import router as legacy_router
 from routes.upload_routes import router as upload_router
 from routes.log_routes import router as log_router
 from services.storage_service import StorageService
@@ -108,9 +108,12 @@ async def add_security_headers(request: Request, call_next):
 async def strip_api_prefix_middleware(request: Request, call_next):
     prefix = settings.API_V1_STR.rstrip("/")
     path = request.scope.get("path", "")
-    if path.startswith(prefix):
-        stripped = path[len(prefix):]
-        request.scope["path"] = stripped if stripped.startswith("/") else ("/" + stripped if stripped else "/")
+    if path == prefix or path.startswith(prefix + "/"):
+        request.scope["path"] = path[len(prefix):] or "/"
+        # Keep raw_path in sync, otherwise URLs rebuilt from the scope mix stripped and unstripped paths
+        raw_path = request.scope.get("raw_path")
+        if raw_path and raw_path.startswith(prefix.encode()):
+            request.scope["raw_path"] = raw_path[len(prefix):] or b"/"
     return await call_next(request)
 
 
@@ -167,11 +170,12 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Mount routers directly following Smart Hydroponic architecture:
 # In OpenAPI schema, endpoints are clean (e.g. /auth/login, /audit-logs/)
 # while the server base URL is /orion/api/v1.
+# Legacy URL redirects first, so old paths like /members/count are not captured by /members/{identifier}
+app.include_router(legacy_router)
 app.include_router(auth_router)
 app.include_router(registration_router)
 app.include_router(member_router)
 app.include_router(upload_router)
-app.include_router(direct_avatar_router)
 app.include_router(log_router)
 
 
@@ -203,7 +207,7 @@ async def health_check():
     }
 
 
-@app.get("/db-test", tags=["Health"])
+@app.get("/health/db", tags=["Health"])
 async def db_test(session: AsyncSession = Depends(get_db)):
     result = await session.execute(text("SELECT 1"))
     return {"status": "connected", "result": result.scalar()}

@@ -101,7 +101,7 @@ async def update_intake_status(
 
 
 @router.post(
-    "/",
+    "",
     response_model=RegistrationResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit(max_requests=10, window_seconds=60, scope="registration_submit"))],
@@ -147,7 +147,7 @@ async def submit_registration(
     return RegistrationResponse.model_validate(reg)
 
 
-@router.get("/", response_model=list[RegistrationResponse])
+@router.get("", response_model=list[RegistrationResponse])
 async def list_registrations(
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
