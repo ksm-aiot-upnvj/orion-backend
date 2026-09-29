@@ -1,7 +1,9 @@
 import random
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from config.config import settings
 from config.db import Base, engine
 from main import app
 
@@ -16,7 +18,7 @@ async def test_bulk_delete_registrations():
         # 1. Login as Superadmin
         login_res = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "OrionAdmin#2026!"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW},
         )
         assert login_res.status_code == 200
         token = login_res.json()["access_token"]

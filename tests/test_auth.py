@@ -1,6 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from config.config import settings
 from main import app
 
 
@@ -9,15 +10,15 @@ async def test_auth_login_superadmin():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "OrionAdmin#2026!"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW},
         )
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
-        assert data["user"]["full_name"] == "Dzulfikri Adjmal"
+        assert data["user"]["full_name"] == settings.SUPERADMIN_NAME
         assert data["user"]["role"] in ["Ketua", "SUPERADMIN"]
         assert data["user"]["is_superadmin"] is True
-        assert data["user"]["student_id"] == "2210511084"
+        assert data["user"]["student_id"] == settings.SUPERADMIN_NIM
 
 
 @pytest.mark.asyncio
@@ -25,7 +26,7 @@ async def test_auth_login_invalid_password():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "wrongpassword"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": "wrongpassword"},
         )
         assert response.status_code == 401
 
@@ -36,7 +37,7 @@ async def test_auth_get_me_and_update_profile():
         # Login
         login_res = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "OrionAdmin#2026!"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW},
         )
         assert login_res.status_code == 200
         token = login_res.json()["access_token"]
@@ -45,13 +46,13 @@ async def test_auth_get_me_and_update_profile():
         # GET /auth/me
         me_res = await ac.get("/orion/api/v1/auth/me", headers=headers)
         assert me_res.status_code == 200
-        assert me_res.json()["student_id"] == "2210511084"
+        assert me_res.json()["student_id"] == settings.SUPERADMIN_NIM
 
         # PUT /auth/me
         update_res = await ac.put(
             "/orion/api/v1/auth/me",
             headers=headers,
-            json={"full_name": "Dzulfikri Adjmal", "avatar": "https://api.dicebear.com/7.x/bottts/svg?seed=admin"},
+            json={"full_name": settings.SUPERADMIN_NAME, "avatar": "https://api.dicebear.com/7.x/bottts/svg?seed=admin"},
         )
         assert update_res.status_code == 200
         assert update_res.json()["avatar"] == "https://api.dicebear.com/7.x/bottts/svg?seed=admin"

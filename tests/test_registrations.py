@@ -1,6 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from config.config import settings
 from config.db import Base, engine
 from main import app
 
@@ -15,7 +16,7 @@ async def test_registrations_crud_and_consent():
         # 1. Login as Admin to get authorization token
         login_res = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "OrionAdmin#2026!"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW},
         )
         assert login_res.status_code == 200
         token = login_res.json()["access_token"]
@@ -35,7 +36,7 @@ async def test_registrations_crud_and_consent():
         assert intake_update_res.status_code == 200
         assert intake_update_res.json()["status"] == "OPEN"
 
-        # 3. Test motivation validator: Reject if > 3 sentences
+        # 3. Test motivation validator: Reject if > 150 words
         import random
         candidate_nim = f"24{random.randint(10000000, 99999999)}"
         bad_submit_res = await ac.post(
@@ -47,7 +48,7 @@ async def test_registrations_crud_and_consent():
                 "email": f"exceeded_{candidate_nim}@upnvj.ac.id",
                 "intake_period": "2026",
                 "interest_track": ["AI"],
-                "motivation": "Kalimat satu. Kalimat dua. Kalimat tiga. Kalimat empat yang dilarang.",
+                "motivation": "Aku suka AIoT " * 51,
                 "consent_given": True,
             },
         )

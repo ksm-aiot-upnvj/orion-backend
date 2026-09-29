@@ -2,7 +2,7 @@ import logging
 import tomllib
 from pathlib import Path
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("orion.config")
@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, validation_alias="REFRESH_TOKEN_EXPIRE_DAYS")
+
+    SUPERADMIN_NIM: str = Field(validation_alias="SUPERADMIN_NIM")
+    SUPERADMIN_NAME: str = Field(validation_alias="SUPERADMIN_NAME")
+    SUPERADMIN_EMAIL: str = Field(validation_alias="SUPERADMIN_EMAIL")
+    SUPERADMIN_PW: str = Field(validation_alias="SUPERADMIN_PW")
 
     # Allowed CORS Origins
     CORS_ORIGINS: list[str] = [
@@ -119,6 +124,12 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.lower() == "production" and self.CORS_ORIGIN_REGEX == r"^https:\/\/.*\.trycloudflare\.com$":
             return None
         return self.CORS_ORIGIN_REGEX
+
+    @field_validator("SUPERADMIN_NIM", "SUPERADMIN_NAME", "SUPERADMIN_EMAIL", "SUPERADMIN_PW")
+    def validate_superadmin_fields(cls, v):
+        if not v:
+            raise ValueError("Superadmin fields cannot be empty")
+        return v
 
 
 settings = Settings()

@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
+from config.config import settings
 from config.db import AsyncSessionLocal, Base, engine
 from main import app
 from models import AuditLog, Member, Registration, User  # noqa: F401
@@ -30,7 +31,7 @@ async def test_ensure_tables_and_rbac():
         # Login as SUPERADMIN
         login_res = await ac.post(
             "/orion/api/v1/auth/login",
-            json={"student_id": "2210511084", "password": "OrionAdmin#2026!"},
+            json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW},
         )
         assert login_res.status_code == 200
         token = login_res.json()["access_token"]
