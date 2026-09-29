@@ -97,6 +97,8 @@ async def test_upload_cv_valid_pdf_and_serve():
         assert serve_res.status_code == 200
         assert serve_res.headers["content-type"] == "application/pdf"
         assert "inline" in serve_res.headers.get("content-disposition", "")
+        assert serve_res.headers["cache-control"] == "private, no-store"
+        assert "noindex" in serve_res.headers["x-robots-tag"]
 
 
         StorageService().delete_cv(final_path)

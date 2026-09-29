@@ -171,7 +171,9 @@ async def serve_cv(filename: str):
         media_type="application/pdf",
         headers={
             "Content-Disposition": f"inline; filename={Path(filename).name}",
-            "Cache-Control": "public, max-age=86400, stale-while-revalidate=3600",
+            # CVs are personal data: never store them in shared caches/CDNs, never index them
+            "Cache-Control": "private, no-store",
+            "X-Robots-Tag": "noindex, nofollow",
             "X-Content-Type-Options": "nosniff",
         },
     )
