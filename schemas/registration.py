@@ -26,7 +26,6 @@ class RegistrationCreate(BaseModel):
     def validate_motivation(cls, v: str | None) -> str | None:
         if not v:
             return v
-        import re
         text_clean = v.strip()
         words = [w for w in text_clean.split() if w.strip()]
         if len(words) > 150:

@@ -7,7 +7,7 @@ from services.storage_service import StorageService
 from utils.auth_deps import require_roles
 from utils.rate_limiter import rate_limit
 
-router = APIRouter(prefix="/uploads", tags=["File Storage & Uploads (UU PDP / GDPR Compliant)"])
+router = APIRouter(prefix="/uploads", tags=["File Storage & Uploads"])
 storage_service = StorageService()
 
 

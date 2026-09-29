@@ -1,5 +1,5 @@
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text

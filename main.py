@@ -42,9 +42,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    root_path="/orion/api/v1",
-    lifespan=lifespan,
+    root_path=settings.API_V1_STR,
     redoc_url=None,
+    servers=[
+        {
+            "url": settings.API_V1_STR,
+            "description": "Default API Server",
+        },
+        {
+            "url": f"http://localhost:8000{settings.API_V1_STR}",
+            "description": "Local Development Server",
+        },
+        {
+            "url": f"http://127.0.0.1:8000{settings.API_V1_STR}",
+            "description": "Localhost Server",
+        },
+    ],
+    lifespan=lifespan,
 )
 
 
@@ -71,7 +85,18 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# 2. CORS configuration (environment-aware)
+# 2. Transparent API prefix stripper middleware (handles /orion/api/v1 gracefully)
+@app.middleware("http")
+async def strip_api_prefix_middleware(request: Request, call_next):
+    prefix = settings.API_V1_STR.rstrip("/")
+    path = request.scope.get("path", "")
+    if path.startswith(prefix):
+        stripped = path[len(prefix):]
+        request.scope["path"] = stripped if stripped.startswith("/") else ("/" + stripped if stripped else "/")
+    return await call_next(request)
+
+
+# 3. CORS configuration (environment-aware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins(),
@@ -86,11 +111,11 @@ app.add_middleware(
 from fastapi.encoders import jsonable_encoder
 
 
-# 3. Global Exception Handlers (Prevent stack trace & raw query leaks in production)
+# 4. Global Exception Handlers (Prevent stack trace & raw query leaks in production)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content={"detail": jsonable_encoder(exc.errors()), "message": "Format data permintaan tidak valid."},
     )
 
@@ -121,59 +146,42 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
-# API v1 Router with /orion/api/v1 prefix
-api_v1_router = APIRouter(prefix=settings.API_V1_STR)
-api_v1_router.include_router(auth_router)
-api_v1_router.include_router(registration_router)
-api_v1_router.include_router(member_router)
-api_v1_router.include_router(upload_router)
-api_v1_router.include_router(direct_avatar_router)
-api_v1_router.include_router(log_router)
-
-# Mount both prefixed and root routers for maximum compatibility
-app.include_router(api_v1_router)
+# Mount routers directly following Smart Hydroponic architecture:
+# In OpenAPI schema, endpoints are clean (e.g. /auth/login, /audit-logs/)
+# while the server base URL is /orion/api/v1.
 app.include_router(auth_router)
 app.include_router(registration_router)
 app.include_router(member_router)
 app.include_router(upload_router)
 app.include_router(direct_avatar_router)
+app.include_router(log_router)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 @app.get(f"{settings.API_V1_STR}/", response_class=HTMLResponse, include_in_schema=False)
 async def api_landing_page(request: Request):
-    request_path = request.url.path.rstrip("/")
     api_prefix = settings.API_V1_STR.rstrip("/")
-    public_prefix = api_prefix if request_path == api_prefix else ""
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "title": settings.PROJECT_NAME,
             "description": "Backend API untuk manajemen KSM AIoT Orion.",
-            "docs_url": f"{public_prefix}/docs",
-            "health_url": f"{public_prefix}/health",
+            "docs_url": f"{api_prefix}/docs",
+            "health_url": f"{api_prefix}/health",
             "api_prefix": api_prefix,
         },
     )
 
 
 @app.get("/health", tags=["Health"])
+@app.get(f"{settings.API_V1_STR}/health", tags=["Health"], include_in_schema=False)
 async def health_check():
     return {
         "status": "healthy",
         "service": "orion-backend",
         "version": settings.VERSION,
         "api_prefix": settings.API_V1_STR,
-    }
-
-
-@app.get(f"{settings.API_V1_STR}/health", tags=["Health"])
-async def api_health_check():
-    return {
-        "status": "healthy",
-        "service": "orion-backend",
-        "version": settings.VERSION,
     }
 
 

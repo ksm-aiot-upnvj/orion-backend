@@ -5,7 +5,9 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import text
+
 from config.db import AsyncSessionLocal
+
 
 async def cleanup():
     async with AsyncSessionLocal() as session:
