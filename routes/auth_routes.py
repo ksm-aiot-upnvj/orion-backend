@@ -2,7 +2,15 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import get_db
-from schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, ProfileUpdate, UserOut
+from schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    LoginResponse,
+    ProfileUpdate,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
+    UserOut,
+)
 from services.audit_log_service import log_audit_event
 from services.auth_service import AuthService
 from utils.auth_deps import get_current_user
@@ -29,6 +37,23 @@ async def login(
 
     service = AuthService(db)
     return await service.authenticate_user(req, ip_address=client_ip, user_agent=user_agent)
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshTokenResponse,
+    dependencies=[Depends(rate_limit(max_requests=30, window_seconds=60, scope="refresh_token"))],
+)
+async def refresh_token(
+    req: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Renew access token (30m) using long-lived (7-day) refresh token.
+    Enables seamless continuous session without forcing user to re-login every 30 minutes.
+    """
+    service = AuthService(db)
+    return await service.refresh_tokens(req.refresh_token)
 
 
 @router.get("/me", response_model=UserOut)

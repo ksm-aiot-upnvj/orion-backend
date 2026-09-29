@@ -17,6 +17,7 @@ from routes.member_routes import router as member_router
 from routes.registration_routes import router as registration_router
 from routes.upload_routes import direct_avatar_router
 from routes.upload_routes import router as upload_router
+from routes.log_routes import router as log_router
 from utils.seed import seed_database
 
 logger = logging.getLogger("orion.api")
@@ -127,6 +128,7 @@ api_v1_router.include_router(registration_router)
 api_v1_router.include_router(member_router)
 api_v1_router.include_router(upload_router)
 api_v1_router.include_router(direct_avatar_router)
+api_v1_router.include_router(log_router)
 
 # Mount both prefixed and root routers for maximum compatibility
 app.include_router(api_v1_router)

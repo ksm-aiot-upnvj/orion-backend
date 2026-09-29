@@ -44,9 +44,20 @@ def create_refresh_token(data: dict[str, Any], expires_delta: timedelta | None =
 
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
-    """Decode and validate a JWT token."""
+    """Decode and validate a JWT access token."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        return payload
+    except jwt.PyJWTError:
+        return None
+
+
+def decode_refresh_token(token: str) -> dict[str, Any] | None:
+    """Decode and validate a JWT refresh token, verifying type == 'refresh'."""
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        if payload.get("type") != "refresh":
+            return None
         return payload
     except jwt.PyJWTError:
         return None

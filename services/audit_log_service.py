@@ -107,9 +107,40 @@ class AuditLogService:
     ) -> list[dict]:
         """Query audit logs with optional filtering and pagination."""
         query_str = """
-            SELECT id, timestamp, actor_id, actor_name, actor_role, action,
-                   resource_type, resource_id, ip_address, user_agent, details, status
+            SELECT audit_logs.id, audit_logs.timestamp, audit_logs.actor_id,
+                   audit_logs.actor_name, audit_logs.actor_role, audit_logs.action,
+                   audit_logs.resource_type, audit_logs.resource_id, audit_logs.ip_address,
+                   audit_logs.user_agent, audit_logs.details, audit_logs.status,
+                   users.is_superadmin AS is_superadmin,
+                   CASE
+                     WHEN audit_logs.resource_type = 'USER' THEN
+                       CASE WHEN target_user.id IS NOT NULL
+                         THEN CONCAT('Akun: ', target_user.student_id, ' (', target_user.full_name, ')')
+                         ELSE NULL END
+                     WHEN audit_logs.resource_type = 'MEMBER' THEN
+                       CASE WHEN target_member.id IS NOT NULL
+                         THEN CONCAT('Anggota: ', target_member.member_id, ' — ', target_member.full_name, ' (', target_member.student_id, ')')
+                         ELSE NULL END
+                     WHEN audit_logs.resource_type = 'REGISTRATION' THEN
+                       CASE WHEN target_registration.id IS NOT NULL
+                         THEN CONCAT('Pendaftar: ', target_registration.full_name, ' (', target_registration.student_id, ')')
+                         ELSE NULL END
+                     ELSE NULL
+                   END AS resource_label
             FROM audit_logs
+            LEFT JOIN users ON users.id = audit_logs.actor_id
+            LEFT JOIN users AS target_user
+              ON audit_logs.resource_type = 'USER'
+             AND target_user.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                       THEN audit_logs.resource_id::uuid END
+            LEFT JOIN members AS target_member
+              ON audit_logs.resource_type = 'MEMBER'
+             AND target_member.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                         THEN audit_logs.resource_id::uuid END
+            LEFT JOIN registrations AS target_registration
+              ON audit_logs.resource_type = 'REGISTRATION'
+             AND target_registration.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                               THEN audit_logs.resource_id::uuid END
             WHERE 1=1
         """
         params: dict[str, Any] = {"limit": min(limit, 200), "offset": max(offset, 0)}
@@ -131,6 +162,18 @@ class AuditLogService:
 
         result = await self.session.execute(text(query_str), params)
         return result.mappings().all()
+
+    async def get_log_stats(self) -> dict[str, int]:
+        """Return aggregate counts for all audit rows, independent of pagination."""
+        result = await self.session.execute(text("""
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE UPPER(status) = 'SUCCESS') AS success,
+                   COUNT(*) FILTER (WHERE UPPER(status) <> 'SUCCESS') AS failed,
+                   COUNT(*) FILTER (WHERE LEFT(UPPER(action), 5) <> 'AUTH_') AS admin_actions
+            FROM audit_logs
+        """))
+        row = result.mappings().one()
+        return {key: int(value or 0) for key, value in row.items()}
 
 
 async def log_audit_event(

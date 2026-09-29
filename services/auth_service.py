@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, ProfileUpdate, UserOut
 from services.audit_log_service import log_audit_event
 from utils.sanitizer import sanitize_text
-from utils.security import create_access_token, hash_password, verify_password
+from utils.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_password,
+    verify_password,
+)
 
 
 class AuthService:
@@ -20,7 +26,7 @@ class AuthService:
         stmt = text(
             """
             SELECT u.id, u.student_id, u.full_name, u.email, u.hashed_password,
-                   COALESCE(m.role::text, u.role) AS role,
+                   CASE WHEN u.is_superadmin = true THEN 'SUPERADMIN' ELSE COALESCE(m.role::text, u.role) END AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
                    COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
@@ -37,7 +43,7 @@ class AuthService:
         stmt = text(
             """
             SELECT u.id, u.student_id, u.full_name, u.email, u.hashed_password,
-                   COALESCE(m.role::text, u.role) AS role,
+                   CASE WHEN u.is_superadmin = true THEN 'SUPERADMIN' ELSE COALESCE(m.role::text, u.role) END AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
                    COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
@@ -55,7 +61,7 @@ class AuthService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> LoginResponse:
-        """Authenticate user credentials using raw SQL and record audit log."""
+        """Authenticate user credentials using raw SQL and record audit log with superadmin & readable resource tracking."""
         identifier = req.student_id.strip()
         user = await self.get_user_by_identifier(identifier)
 
@@ -65,49 +71,130 @@ class AuthService:
                 session=self.session,
                 action="AUTH_LOGIN_FAILED",
                 resource_type="USER",
+                resource_id=f"Akun: {identifier}",
                 actor_id=user["id"] if user else None,
                 actor_name=user["full_name"] if user else identifier,
                 actor_role=user["role"] if user else "UNKNOWN",
                 ip_address=ip_address,
                 user_agent=user_agent,
                 status="FAILED",
-                details={"identifier": identifier},
+                details={"identifier": identifier, "is_superadmin": bool(user.get("is_superadmin", False)) if user else False},
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="NIM / Email atau Password salah. Silakan coba lagi.",
             )
 
-        token = create_access_token(
+        is_sa = bool(user.get("is_superadmin", False))
+        effective_role = "SUPERADMIN" if is_sa else (user.get("role") or "USER")
+
+        access_token = create_access_token(
             data={
                 "sub": str(user["id"]),
                 "student_id": user["student_id"],
-                "role": user["role"],
+                "role": effective_role,
                 "division": user.get("division"),
-                "is_superadmin": user.get("is_superadmin", False),
+                "is_superadmin": is_sa,
                 "name": user["full_name"],
             }
         )
 
-        # Record successful login in audit log
+        refresh_token = create_refresh_token(
+            data={
+                "sub": str(user["id"]),
+                "student_id": user["student_id"],
+            }
+        )
+
+        # Human-readable Resource info (e.g. "Akun: 2310511001 (Dzulfikri Adjmal)") instead of cold UUID
+        readable_resource = f"Akun: {user['student_id']} ({user['full_name']})"
+
+        # Record successful login in audit log with is_superadmin tracking
         await log_audit_event(
             session=self.session,
             action="AUTH_LOGIN_SUCCESS",
             resource_type="USER",
-            resource_id=str(user["id"]),
+            resource_id=readable_resource,
             actor_id=user["id"],
             actor_name=user["full_name"],
-            actor_role=user["role"],
+            actor_role=effective_role,
             ip_address=ip_address,
             user_agent=user_agent,
             status="SUCCESS",
+            details={
+                "is_superadmin": is_sa,
+                "student_id": user["student_id"],
+                "role": effective_role,
+                "division": user.get("division"),
+            },
         )
 
         return LoginResponse(
-            access_token=token,
+            access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             user=UserOut.model_validate(user),
         )
+
+    async def refresh_tokens(self, refresh_token_str: str) -> dict:
+        """Validate 7-day refresh token and issue a fresh 30-minute access token."""
+        payload = decode_refresh_token(refresh_token_str)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesi refresh token telah kedaluwarsa atau tidak valid. Silakan login kembali.",
+            )
+
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Payload refresh token tidak valid.",
+            )
+
+        try:
+            user_uuid = uuid.UUID(user_id_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Format UUID user tidak valid.",
+            )
+
+        user = await self.get_user_by_id(user_uuid)
+        if not user or not user.get("is_active"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Akun pengguna tidak aktif atau tidak ditemukan.",
+            )
+
+        is_sa = bool(user.get("is_superadmin", False))
+        effective_role = "SUPERADMIN" if is_sa else (user.get("role") or "USER")
+
+        new_access_token = create_access_token(
+            data={
+                "sub": str(user["id"]),
+                "student_id": user["student_id"],
+                "role": effective_role,
+                "division": user.get("division"),
+                "is_superadmin": is_sa,
+                "name": user["full_name"],
+            }
+        )
+
+        # Issue fresh refresh token for continuous active sessions
+        new_refresh_token = create_refresh_token(
+            data={
+                "sub": str(user["id"]),
+                "student_id": user["student_id"],
+            }
+        )
+
+        return {
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer",
+            "user": UserOut.model_validate(user),
+        }
 
     async def update_profile(self, user_id: uuid.UUID, data: ProfileUpdate) -> dict:
         """Update current logged-in user profile with sanitization and audit log."""
