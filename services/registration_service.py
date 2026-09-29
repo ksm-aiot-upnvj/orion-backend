@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, SelectionStatus
 from services.audit_log_service import log_audit_event
+from services.member_id import member_id_year, next_member_id
 from services.storage_service import StorageService
 from utils.sanitizer import sanitize_dict_fields
 from utils.uuid_utils import generate_uuid7
@@ -181,24 +182,14 @@ class RegistrationService:
         if reg["status"] == SelectionStatus.ACCEPTED.value and reg.get("member_id"):
             return reg
 
-        # Count members for sequential ID
-        count_stmt = text("SELECT COUNT(*) AS total FROM members")
-        count_res = await self.session.execute(count_stmt)
-        total_row = _mapping_to_dict(count_res.mappings().first())
-        total_members = total_row["total"] if total_row else 0
-
-        intake_raw = str(reg.get("intake_period") or "").strip()
-        student_id_raw = str(reg.get("student_id") or "").strip()
-        if intake_raw.isdigit() and len(intake_raw) == 4:
-            year = intake_raw
-        elif intake_raw.isdigit() and len(intake_raw) == 2:
-            year = f"20{intake_raw}"
-        elif len(student_id_raw) >= 2 and student_id_raw[:2].isdigit():
-            year = f"20{student_id_raw[:2]}"
-        else:
-            year = str(datetime.now().year)
-
-        member_id = f"AIOT-{year}-{str(total_members + 1).zfill(3)}"
+        # Reuse the member ID when this NIM is already a member, otherwise take the next free one for the year
+        existing_member = await self.session.execute(
+            text("SELECT member_id FROM members WHERE student_id = :student_id"), {"student_id": reg["student_id"]}
+        )
+        member_id = existing_member.scalar()
+        member_exists = member_id is not None
+        if not member_exists:
+            member_id = await next_member_id(self.session, member_id_year(reg.get("intake_period"), reg.get("student_id")))
         review_note = f"Disetujui oleh {reviewer_name} ({reviewer_role})"
 
         # Update registration status
@@ -223,10 +214,7 @@ class RegistrationService:
         if updated_reg is None:
             raise HTTPException(status_code=500, detail="Status pendaftaran gagal diperbarui")
 
-        # Check existing member
-        check_member = text("SELECT id FROM members WHERE student_id = :student_id")
-        existing_m = await self.session.execute(check_member, {"student_id": reg["student_id"]})
-        if not existing_m.mappings().first():
+        if not member_exists:
             reg_tracks = reg.get("interest_track") or []
             if isinstance(reg_tracks, str):
                 reg_tracks = [reg_tracks]

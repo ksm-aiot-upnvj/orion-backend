@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -7,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.enums import MemberRole, MemberStatus, StudyProgram
 from services.audit_log_service import log_audit_event
+from services.member_id import member_id_year, next_member_id
 from services.storage_service import StorageService, release_upload
 from utils.auth_deps import is_superadmin_user
 from utils.sanitizer import sanitize_dict_fields
@@ -199,28 +199,8 @@ class MemberService:
         m_id = member_data.get("id", generate_uuid7())
         member_id = member_data.get("member_id")
         if not member_id:
-            intake_raw = str(member_data.get("intake_period") or "").strip()
-            student_id_raw = str(member_data.get("student_id") or "").strip()
-            if intake_raw.isdigit() and len(intake_raw) == 4:
-                year = intake_raw
-            elif intake_raw.isdigit() and len(intake_raw) == 2:
-                year = f"20{intake_raw}"
-            elif len(student_id_raw) >= 2 and student_id_raw[:2].isdigit():
-                year = f"20{student_id_raw[:2]}"
-            else:
-                year = str(datetime.now().year)
-
-            stmt = text("SELECT member_id FROM members WHERE member_id LIKE :prefix")
-            res = await self.session.execute(stmt, {"prefix": f"AIOT-{year}-%"})
-            rows = res.scalars().all()
-            max_num = 0
-            for mid in rows:
-                try:
-                    num = int(str(mid).split("-")[-1])
-                    max_num = max(max_num, num)
-                except ValueError:
-                    pass
-            member_id = f"AIOT-{year}-{str(max_num + 1).zfill(3)}"
+            year = member_id_year(member_data.get("intake_period"), member_data.get("student_id"))
+            member_id = await next_member_id(self.session, year)
 
         # Normalize enum/array values
         def get_enum_val(v, default_val):
