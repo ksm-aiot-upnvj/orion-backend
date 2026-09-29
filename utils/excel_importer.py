@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ import openpyxl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.config import settings
 from config.db import AsyncSessionLocal
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
 from utils.security import hash_password
@@ -162,20 +164,41 @@ class ExcelMemberImporter:
 
 
     @staticmethod
-    async def import_to_database(db: AsyncSession, members: list[dict], default_password: str = "aiotupnvj2026") -> dict:
-        """Insert or update all members and sync login accounts in PostgreSQL using raw SQL."""
-        default_hash = hash_password(default_password)
+    async def import_to_database(
+        db: AsyncSession,
+        members: list[dict],
+        default_password: str | None = None,
+        actor: dict | None = None,
+    ) -> dict:
+        """
+        Insert or update all members and sync login accounts in PostgreSQL using raw SQL.
+
+        New login accounts get IMPORT_DEFAULT_PASSWORD when configured; otherwise an unguessable random
+        password, so the account can only be used after an admin resets it (PUT /members/{id}/password).
+        Import never grants superadmin, and a non-superadmin importer cannot change their own role/division/status.
+        """
+        initial_password = default_password or settings.IMPORT_DEFAULT_PASSWORD or secrets.token_urlsafe(32)
+        default_hash = hash_password(initial_password)
+        actor_is_superadmin = bool(actor) and (
+            bool(actor.get("is_superadmin")) or (actor.get("role") or "").upper() == "SUPERADMIN"
+        )
+        actor_student_id = actor.get("student_id") if actor else None
         imported_count = 0
         user_synced_count = 0
 
         # Pre-fetch existing members to maintain consistent member_id or assign new ones
-        existing_result = await db.execute(text("SELECT id, student_id, member_id FROM members"))
-        existing_by_student = {r["student_id"]: r["member_id"] for r in existing_result.mappings().all()}
+        existing_result = await db.execute(text("SELECT id, student_id, member_id, role, division, status FROM members"))
+        existing_rows = {r["student_id"]: r for r in existing_result.mappings().all()}
+        existing_by_student = {sid: r["member_id"] for sid, r in existing_rows.items()}
         used_member_ids = set(existing_by_student.values())
 
         for idx, m in enumerate(members, start=1):
             student_id = m["student_id"]
-            
+            if actor and not actor_is_superadmin and student_id == actor_student_id and student_id in existing_rows:
+                # Keep the importer's own privilege-bearing fields unchanged
+                own = existing_rows[student_id]
+                m = {**m, "role": own["role"], "division": own["division"], "status": own["status"]}
+
             # Determine unique member_id
             if student_id in existing_by_student:
                 member_id = existing_by_student[student_id]
@@ -280,9 +303,7 @@ class ExcelMemberImporter:
             actual_member_id = res.scalar_one()
             imported_count += 1
 
-            # 2. Upsert corresponding User login account
-            is_super = "Ketua" in m["role"] and "Wakil" not in m["role"]
-
+            # 2. Upsert corresponding User login account (never grants superadmin; existing flag is preserved)
             user_stmt = text(
                 """
                 INSERT INTO users (id, member_id, student_id, full_name, email, hashed_password, role, division, avatar, is_superadmin, is_active, created_at)
@@ -292,8 +313,7 @@ class ExcelMemberImporter:
                     full_name = EXCLUDED.full_name,
                     email = EXCLUDED.email,
                     role = EXCLUDED.role,
-                    division = EXCLUDED.division,
-                    is_superadmin = EXCLUDED.is_superadmin
+                    division = EXCLUDED.division
                 """
             )
             await db.execute(user_stmt, {
@@ -306,7 +326,7 @@ class ExcelMemberImporter:
                 "role": m["role"],
                 "division": m["division"],
                 "avatar": None,
-                "is_superadmin": is_super,
+                "is_superadmin": False,
             })
             user_synced_count += 1
 

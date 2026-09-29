@@ -184,7 +184,7 @@ async def import_members_excel(
     file_bytes = io.BytesIO(content)
     try:
         members_data = ExcelMemberImporter.parse_excel(file_bytes, sheet_name=sheet_name)
-        result = await ExcelMemberImporter.import_to_database(db, members_data)
+        result = await ExcelMemberImporter.import_to_database(db, members_data, actor=current_user)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal memproses Excel: {e!s}") from e
