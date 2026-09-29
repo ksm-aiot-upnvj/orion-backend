@@ -18,6 +18,7 @@ from schemas.registration import (
 )
 from services.registration_service import RegistrationService
 from utils.auth_deps import can_manage_selection, require_pengurus
+from utils.client_ip import get_client_ip
 from utils.rate_limiter import rate_limit
 from utils.uuid_utils import generate_uuid7
 
@@ -139,7 +140,7 @@ async def submit_registration(
         except Exception:
             pass
 
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "127.0.0.1")
+    client_ip = get_client_ip(request)
     user_agent = request.headers.get("User-Agent", "Unknown")
 
     service = RegistrationService(db)

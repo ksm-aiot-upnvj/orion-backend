@@ -14,6 +14,7 @@ from schemas.auth import (
 from services.audit_log_service import log_audit_event
 from services.auth_service import AuthService
 from utils.auth_deps import get_current_user
+from utils.client_ip import get_client_ip
 from utils.rate_limiter import rate_limit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -32,7 +33,7 @@ async def login(
     """
     Authenticate pengurus KSM with Rate Limiting (5 attempts / min) and audit logging.
     """
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "127.0.0.1")
+    client_ip = get_client_ip(request)
     user_agent = request.headers.get("User-Agent", "Unknown")
 
     service = AuthService(db)
@@ -94,7 +95,7 @@ async def logout(
     db: AsyncSession = Depends(get_db),
 ):
     """Logout current session and record audit trail."""
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "127.0.0.1")
+    client_ip = get_client_ip(request)
     await log_audit_event(
         session=db,
         action="AUTH_LOGOUT",

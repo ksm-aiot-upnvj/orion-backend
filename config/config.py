@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = Field(default=2 * 1024 * 1024, validation_alias="MAX_UPLOAD_SIZE")  # 2MB
     # Staged uploads never saved into a record are purged after this many hours
     STAGED_UPLOAD_TTL_HOURS: int = Field(default=24, validation_alias="STAGED_UPLOAD_TTL_HOURS")
+    # Number of reverse proxies in front of the API that append to X-Forwarded-For (e.g. cloudflared/nginx = 1).
+    # 0 = trust only the socket peer address.
+    TRUSTED_PROXY_HOPS: int = Field(default=1, ge=0, validation_alias="TRUSTED_PROXY_HOPS")
     # Initial password for login accounts created by the Excel import. Unset = random, unusable until reset.
     IMPORT_DEFAULT_PASSWORD: str | None = Field(default=None, validation_alias="IMPORT_DEFAULT_PASSWORD")
 

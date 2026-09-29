@@ -5,6 +5,8 @@ from typing import ClassVar
 
 from fastapi import HTTPException, Request, status
 
+from utils.client_ip import get_client_ip
+
 
 class InMemoryRateLimiter:
     """
@@ -13,6 +15,13 @@ class InMemoryRateLimiter:
     """
 
     _storage: ClassVar[dict[str, list[float]]] = defaultdict(list)
+    MAX_KEYS: ClassVar[int] = 10_000
+
+    @classmethod
+    def _prune(cls, window_start: float) -> None:
+        """Drop keys with no recent requests so the table cannot grow without bound."""
+        for stale in [k for k, ts in cls._storage.items() if not ts or ts[-1] <= window_start]:
+            del cls._storage[stale]
 
     @classmethod
     def is_allowed(cls, key: str, max_requests: int, window_seconds: int) -> tuple[bool, int]:
@@ -25,6 +34,8 @@ class InMemoryRateLimiter:
 
         # Clean timestamps older than the sliding window
         cls._storage[key] = [t for t in cls._storage[key] if t > window_start]
+        if len(cls._storage) > cls.MAX_KEYS:
+            cls._prune(window_start)
 
         if len(cls._storage[key]) >= max_requests:
             oldest = cls._storage[key][0]
@@ -60,17 +71,8 @@ def rate_limit(
     """
 
     async def dependency(request: Request) -> None:
-        if key_func:
-            client_id = key_func(request)
-        else:
-            # Extract client IP from X-Forwarded-For or client.host
-            forwarded = request.headers.get("X-Forwarded-For")
-            if forwarded:
-                client_id = forwarded.split(",")[0].strip()
-            elif request.client:
-                client_id = request.client.host
-            else:
-                client_id = "127.0.0.1"
+        # Never key on the raw (client-controlled) X-Forwarded-For value: rotating it bypassed the limit
+        client_id = key_func(request) if key_func else get_client_ip(request)
 
         rate_key = f"{scope}:{client_id}"
         allowed, retry_after = InMemoryRateLimiter.is_allowed(
