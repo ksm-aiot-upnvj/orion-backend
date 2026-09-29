@@ -10,7 +10,6 @@ from utils.excel_importer import ExcelMemberImporter
 
 KETUA_NIM = "2410511911"
 STAFF_NIM = "2410511912"
-LEGACY_DEFAULT_PASSWORD = "aiotupnvj2026"  # the value previously hardcoded in the importer and frontend
 
 
 def _row(nim: str, role: str, division: str | None = "PSDM") -> dict:
@@ -56,21 +55,25 @@ async def cleanup_import_rows():
 
 
 @pytest.mark.asyncio
-async def test_import_does_not_grant_superadmin_or_known_password():
+async def test_import_does_not_grant_superadmin_or_known_password(monkeypatch):
+    import utils.excel_importer as importer
+
+    monkeypatch.setattr(importer.settings, "IMPORT_DEFAULT_PASSWORD", None)
+    used_passwords = []
+    real_hash = importer.hash_password
+    monkeypatch.setattr(importer, "hash_password", lambda pw: used_passwords.append(pw) or real_hash(pw))
     async with AsyncSessionLocal() as session:
         await ExcelMemberImporter.import_to_database(session, [_row(KETUA_NIM, "Ketua", "BPH"), _row(STAFF_NIM, "Staff")])
+        await ExcelMemberImporter.import_to_database(session, [_row(STAFF_NIM, "Staff")])
         res = await session.execute(
             text("SELECT student_id, is_superadmin FROM users WHERE student_id = ANY(:ids)"),
             {"ids": [KETUA_NIM, STAFF_NIM]},
         )
         flags = {r["student_id"]: r["is_superadmin"] for r in res.mappings().all()}
     assert flags == {KETUA_NIM: False, STAFF_NIM: False}
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        res = await ac.post(
-            "/orion/api/v1/auth/login", json={"student_id": KETUA_NIM, "password": LEGACY_DEFAULT_PASSWORD}
-        )
-    assert res.status_code == 401
+    # Without IMPORT_DEFAULT_PASSWORD every import uses a fresh unguessable password (no shared constant)
+    assert len(used_passwords) == 2 and used_passwords[0] != used_passwords[1]
+    assert all(len(pw) >= 32 for pw in used_passwords)
 
 
 @pytest.mark.asyncio
