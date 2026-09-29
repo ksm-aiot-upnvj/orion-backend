@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger("orion.config")
 
 # Public development default; the app refuses to start in production with it (see validate_production_security)
-DEV_DEFAULT_JWT_SECRET = "orion-secret-key-ksm-aiot-upnvj-2026-supersecure-enterprise-jwt"
+DEV_DEFAULT_JWT_SECRET = "orion-secret-key-ksm-aiot-upnvj-2026-supersecure-enterprise-jwt"  # nosec B105 - public dev default, rejected in production
 MIN_JWT_SECRET_LENGTH = 32
 ALLOWED_JWT_ALGORITHMS = ("HS256", "HS384", "HS512")
 

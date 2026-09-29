@@ -367,7 +367,7 @@ class RegistrationService:
             return 0
 
         where_clause = " OR ".join(conditions)
-        fetch_stmt = text(f"SELECT id, student_id, status, photo, cv_url FROM registrations WHERE {where_clause}")
+        fetch_stmt = text(f"SELECT id, student_id, status, photo, cv_url FROM registrations WHERE {where_clause}")  # nosec B608 - where_clause is one of two constant fragments; ids are bound
         res = await self.session.execute(fetch_stmt, params)
         rows = res.mappings().all()
 

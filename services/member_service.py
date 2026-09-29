@@ -404,7 +404,7 @@ class MemberService:
                     params[k] = v
 
         if fields:
-            stmt = text(f"UPDATE members SET {', '.join(fields)} WHERE id = :id RETURNING *")
+            stmt = text(f"UPDATE members SET {', '.join(fields)} WHERE id = :id RETURNING *")  # nosec B608 - column names come from MemberUpdate fields; values are bound
             try:
                 result = await self.session.execute(stmt, params)
                 await self.session.commit()

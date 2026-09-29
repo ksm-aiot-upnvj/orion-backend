@@ -133,7 +133,7 @@ class AuthService:
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
-            token_type="bearer",
+            token_type="bearer",  # nosec B106 - OAuth token type, not a password
             user=UserOut.model_validate(user),
         )
 
@@ -193,7 +193,7 @@ class AuthService:
         return {
             "access_token": new_access_token,
             "refresh_token": new_refresh_token,
-            "token_type": "bearer",
+            "token_type": "bearer",  # nosec B105 - OAuth token type, not a password
             "user": UserOut.model_validate(user),
         }
 
@@ -245,13 +245,8 @@ class AuthService:
                 raise HTTPException(status_code=404, detail="User tidak ditemukan")
             return user
 
-        stmt = text(
-            f"""
-            UPDATE users
-            SET {', '.join(updates)}
-            WHERE id = :user_id
-            """
-        )
+        # SET list is built from constant column fragments; values are bound parameters
+        stmt = text(f"UPDATE users SET {', '.join(updates)} WHERE id = :user_id")  # nosec B608
         try:
             await self.session.execute(stmt, params)
             await self.session.commit()

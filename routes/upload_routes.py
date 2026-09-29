@@ -64,7 +64,7 @@ async def serve_avatar(filename: str):
     )
 
 
-@router.get("/tmp/avatars/{filename}")
+@router.get("/tmp/avatars/{filename}")  # nosec B108 - URL path, not a filesystem path
 async def serve_staged_avatar(filename: str):
     """Serve a staged (not yet saved) avatar so the form can preview it."""
     file_path = storage_service.get_staged_full_path("avatars", filename)
@@ -85,7 +85,7 @@ async def serve_staged_avatar(filename: str):
     )
 
 
-@router.get("/tmp/cvs/{filename}")
+@router.get("/tmp/cvs/{filename}")  # nosec B108 - URL path, not a filesystem path
 async def serve_staged_cv(filename: str):
     """Serve a staged (not yet saved) CV so the form can preview it."""
     file_path = storage_service.get_staged_full_path("cvs", filename)
