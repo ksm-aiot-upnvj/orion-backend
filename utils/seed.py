@@ -16,16 +16,17 @@ async def seed_superadmin(db: AsyncSession) -> dict:
 
     stmt = text(
         """
-        INSERT INTO users (id, student_id, full_name, email, hashed_password, role, division, avatar, is_active, created_at)
-        VALUES (:id, :student_id, :full_name, :email, :hashed_password, 'SUPERADMIN', :division, NULL, true, NOW())
+        INSERT INTO users (id, student_id, full_name, email, hashed_password, role, division, avatar, is_superadmin, is_active, created_at)
+        VALUES (:id, :student_id, :full_name, :email, :hashed_password, 'SUPERADMIN', :division, NULL, true, true, NOW())
         ON CONFLICT (student_id) DO UPDATE SET
             full_name = EXCLUDED.full_name,
             email = EXCLUDED.email,
             hashed_password = EXCLUDED.hashed_password,
             role = 'SUPERADMIN',
             division = EXCLUDED.division,
+            is_superadmin = true,
             is_active = true
-        RETURNING id, student_id, full_name, email, role, division, is_active;
+        RETURNING id, student_id, full_name, email, role, division, is_superadmin, is_active;
         """
     )
     result = await db.execute(stmt, {
@@ -54,7 +55,7 @@ async def main():
         print(f"Email    : {user['email']}")
         print(f"Role     : {user['role']}")
         print(f"Divisi   : {user['division']}")
-        print(f"Password : {settings.SUPERADMIN_PW}")
+        print("Password : (dari SUPERADMIN_PW di .env)")
 
 
 if __name__ == "__main__":
