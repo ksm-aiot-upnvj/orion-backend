@@ -44,6 +44,8 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = Field(default="uploads", validation_alias="UPLOAD_DIR")
     MAX_UPLOAD_SIZE: int = Field(default=2 * 1024 * 1024, validation_alias="MAX_UPLOAD_SIZE")  # 2MB
+    # Staged uploads never saved into a record are purged after this many hours
+    STAGED_UPLOAD_TTL_HOURS: int = Field(default=24, validation_alias="STAGED_UPLOAD_TTL_HOURS")
 
     # Security & Tokens: Short-lived access tokens (30 mins) + 7 days refresh
     SECRET_KEY: str = Field(

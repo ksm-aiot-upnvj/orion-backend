@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -18,10 +19,25 @@ from routes.registration_routes import router as registration_router
 from routes.upload_routes import direct_avatar_router
 from routes.upload_routes import router as upload_router
 from routes.log_routes import router as log_router
+from services.storage_service import StorageService
 from utils.seed import seed_database
 
 logger = logging.getLogger("orion.api")
 templates = Jinja2Templates(directory="templates")
+
+
+async def purge_staged_uploads_periodically(interval_seconds: int = 3600) -> None:
+    """Remove staged uploads (tmp/) that were never saved with a form."""
+    storage = StorageService()
+    max_age = settings.STAGED_UPLOAD_TTL_HOURS * 3600
+    while True:
+        try:
+            removed = await asyncio.to_thread(storage.purge_stale_staged, max_age)
+            if removed:
+                logger.info("Purged %d stale staged upload(s)", removed)
+        except OSError as e:
+            logger.warning("Staged upload purge failed: %s", e)
+        await asyncio.sleep(interval_seconds)
 
 
 @asynccontextmanager
@@ -35,7 +51,9 @@ async def lifespan(app: FastAPI):
         async with AsyncSessionLocal() as session:
             await seed_database(session)
 
+    purge_task = asyncio.create_task(purge_staged_uploads_periodically())
     yield
+    purge_task.cancel()
     await engine.dispose()
 
 

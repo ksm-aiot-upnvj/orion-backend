@@ -62,6 +62,15 @@ class RegistrationService:
         if hasattr(prodi_val, "value"):
             prodi_val = prodi_val.value
 
+        # Promote staged uploads only now that the form is actually being saved
+        storage = StorageService()
+        photo_path, promoted_photo = storage.commit_upload_field(payload.get("photo"), "avatars")
+        try:
+            cv_path, promoted_cv = storage.commit_upload_field(payload.get("cv_url"), "cvs")
+        except HTTPException:
+            storage.unpromote_upload(promoted_photo)
+            raise
+
         stmt = text(
             """
             INSERT INTO registrations (
@@ -87,16 +96,23 @@ class RegistrationService:
             "intake_period": payload["intake_period"],
             "interest_track": tracks,
             "motivation": payload.get("motivation"),
-            "photo": payload.get("photo"),
-            "cv_url": payload.get("cv_url"),
+            "photo": photo_path,
+            "cv_url": cv_path,
             "portfolio_url": payload.get("portfolio_url"),
             "status": SelectionStatus.PENDING.value,
             "submit_date": submit_date,
             "consent_given": consent_given,
             "consent_timestamp": consent_timestamp,
         }
-        result = await self.session.execute(stmt, params)
-        await self.session.commit()
+        try:
+            result = await self.session.execute(stmt, params)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            # Put files back into staging so the candidate can retry without re-uploading
+            storage.unpromote_upload(promoted_photo)
+            storage.unpromote_upload(promoted_cv)
+            raise
         created_reg = _mapping_to_dict(result.mappings().first())
         if created_reg is None:
             raise HTTPException(status_code=500, detail="Pendaftaran gagal dibuat")

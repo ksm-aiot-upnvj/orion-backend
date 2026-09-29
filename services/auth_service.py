@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, ProfileUpdate, UserOut
 from services.audit_log_service import log_audit_event
+from services.storage_service import StorageService, release_upload
 from utils.sanitizer import sanitize_text
 from utils.security import (
     create_access_token,
@@ -206,9 +207,30 @@ class AuthService:
         if data.email is not None:
             updates.append("email = :email")
             params["email"] = sanitize_text(data.email)
+        storage = StorageService()
+        promoted_avatar = None
+        previous_avatar = None
         if data.avatar is not None:
+            current = await self.session.execute(
+                text(
+                    """
+                    SELECT u.avatar AS own_avatar, COALESCE(u.avatar, m.avatar) AS effective_avatar
+                    FROM users u
+                    LEFT JOIN members m ON u.student_id = m.student_id
+                    WHERE u.id = :user_id
+                    """
+                ),
+                {"user_id": user_id},
+            )
+            current_row = current.mappings().first()
+            previous_avatar = current_row["own_avatar"] if current_row else None
+            # The form is prefilled with the effective avatar (possibly the member's), so keeping it is allowed
+            keep = {previous_avatar, current_row["effective_avatar"]} if current_row else set()
+            avatar_value, promoted_avatar = storage.commit_upload_field(
+                data.avatar, "avatars", keep_values=keep, allow_external=True
+            )
             updates.append("avatar = :avatar")
-            params["avatar"] = data.avatar
+            params["avatar"] = avatar_value
 
         if not updates:
             user = await self.get_user_by_id(user_id)
@@ -223,8 +245,15 @@ class AuthService:
             WHERE id = :user_id
             """
         )
-        await self.session.execute(stmt, params)
-        await self.session.commit()
+        try:
+            await self.session.execute(stmt, params)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            storage.unpromote_upload(promoted_avatar)
+            raise
+        if previous_avatar and "avatar" in params and previous_avatar != params["avatar"]:
+            await release_upload(self.session, previous_avatar)
         updated_user = await self.get_user_by_id(user_id)
         if not updated_user:
             raise HTTPException(status_code=404, detail="User tidak ditemukan")

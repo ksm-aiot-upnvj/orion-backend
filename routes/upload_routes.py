@@ -25,6 +25,8 @@ async def upload_avatar(
     - Converts & compresses to optimized WebP.
     - Pseudonymizes filename with UUIDv4.
     - Rate limited to 10 uploads / minute per IP.
+    The file is only staged (tmp/avatars/...). It becomes permanent when the returned
+    `path` is submitted with the owning form; unsaved uploads are purged automatically.
     """
     relative_path = await storage_service.save_upload_avatar(file)
     filename = Path(relative_path).name
@@ -32,7 +34,7 @@ async def upload_avatar(
     return {
         "filename": filename,
         "path": relative_path,
-        "url": f"/orion/api/v1/uploads/avatars/{filename}",
+        "url": f"/orion/api/v1/uploads/tmp/avatars/{filename}",
         "message": "Foto berhasil diunggah dan diproses.",
     }
 
@@ -57,6 +59,48 @@ async def serve_avatar(filename: str):
             "Cache-Control": "public, max-age=86400, stale-while-revalidate=3600",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'",
+        },
+    )
+
+
+@router.get("/tmp/avatars/{filename}")
+async def serve_staged_avatar(filename: str):
+    """Serve a staged (not yet saved) avatar so the form can preview it."""
+    file_path = storage_service.get_staged_full_path("avatars", filename)
+    if not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File foto sementara tidak ditemukan atau sudah kedaluwarsa.",
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        },
+    )
+
+
+@router.get("/tmp/cvs/{filename}")
+async def serve_staged_cv(filename: str):
+    """Serve a staged (not yet saved) CV so the form can preview it."""
+    file_path = storage_service.get_staged_full_path("cvs", filename)
+    if not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Berkas CV sementara tidak ditemukan atau sudah kedaluwarsa.",
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename={Path(filename).name}",
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 
@@ -109,6 +153,7 @@ async def upload_cv(
     - Validates file size (max 5MB), MIME type, and Magic Bytes (%PDF-).
     - Pseudonymizes filename with UUIDv4.
     - Rate limited to 10 uploads / minute per IP.
+    Staged like avatars: permanent only after the registration form is submitted.
     """
     relative_path = await storage_service.save_upload_cv(file)
     filename = Path(relative_path).name
@@ -116,7 +161,7 @@ async def upload_cv(
     return {
         "filename": filename,
         "path": relative_path,
-        "url": f"/orion/api/v1/uploads/cvs/{filename}",
+        "url": f"/orion/api/v1/uploads/tmp/cvs/{filename}",
         "message": "Berkas CV berhasil diunggah dan diproses.",
     }
 

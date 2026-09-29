@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.enums import MemberRole, MemberStatus, StudyProgram
 from services.audit_log_service import log_audit_event
-from services.storage_service import StorageService
+from services.storage_service import StorageService, release_upload
 from utils.sanitizer import sanitize_dict_fields
 from utils.security import hash_password
 from utils.uuid_utils import generate_uuid7
@@ -224,6 +224,17 @@ class MemberService:
         elif tracks is not None:
             tracks = [t.value if hasattr(t, "value") else str(t) for t in tracks]
 
+        # Upsert may overwrite an existing member's avatar; remember it to release afterwards
+        prev = await self.session.execute(
+            text("SELECT avatar FROM members WHERE student_id = :student_id"),
+            {"student_id": member_data.get("student_id")},
+        )
+        previous_avatar = prev.scalar()
+        storage = StorageService()
+        avatar_value, promoted_avatar = storage.commit_upload_field(
+            member_data.get("avatar"), "avatars", keep_values={previous_avatar}, allow_external=True
+        )
+
         stmt = text(
             """
             INSERT INTO members (
@@ -298,13 +309,20 @@ class MemberService:
             "other_activities": member_data.get("other_activities"),
             "discord_id": member_data.get("discord_id"),
             "registration_timestamp": member_data.get("registration_timestamp"),
-            "avatar": member_data.get("avatar"),
+            "avatar": avatar_value,
             "status": stat,
             "join_date": member_data.get("join_date"),
         }
-        result = await self.session.execute(stmt, params)
-        await self.session.commit()
+        try:
+            result = await self.session.execute(stmt, params)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            storage.unpromote_upload(promoted_avatar)
+            raise
         created_row = dict(result.mappings().first())
+        if previous_avatar and previous_avatar != avatar_value:
+            await release_upload(self.session, previous_avatar)
 
         # Handle ERP account creation if requested
         if member_data.get("create_erp_account") and member_data.get("erp_password"):
@@ -376,6 +394,15 @@ class MemberService:
         fields = []
         params = {"id": existing["id"]}
 
+        storage = StorageService()
+        promoted_avatar = None
+        if update_data.get("avatar") is not None:
+            update_data["avatar"], promoted_avatar = storage.commit_upload_field(
+                update_data["avatar"], "avatars", keep_values={existing.get("avatar")}, allow_external=True
+            )
+            if update_data["avatar"] is None:
+                fields.append("avatar = NULL")
+
         for k, v in update_data.items():
             if k == "division" and v is None:
                 fields.append("division = NULL")
@@ -405,11 +432,21 @@ class MemberService:
 
         if fields:
             stmt = text(f"UPDATE members SET {', '.join(fields)} WHERE id = :id RETURNING *")
-            result = await self.session.execute(stmt, params)
-            await self.session.commit()
+            try:
+                result = await self.session.execute(stmt, params)
+                await self.session.commit()
+            except Exception:
+                await self.session.rollback()
+                storage.unpromote_upload(promoted_avatar)
+                raise
             updated_row = dict(result.mappings().first())
         else:
             updated_row = dict(existing)
+
+        # Replaced avatar: remove the old file unless another record still uses it
+        old_avatar = existing.get("avatar")
+        if old_avatar and old_avatar != updated_row.get("avatar"):
+            await release_upload(self.session, old_avatar)
 
         # Policy: If status changed to Alumni or Tidak Aktif, automatically revoke/deactivate ERP login access
         new_status = params.get("status")
