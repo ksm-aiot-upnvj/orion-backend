@@ -4,14 +4,14 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import get_db
 from services.auth_service import AuthService
 from utils.security import decode_access_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/orion/api/v1/auth/login", auto_error=False)
+security_scheme = HTTPBearer(auto_error=False)
 
 
 # Standard Role Constants for ORION
@@ -24,13 +24,14 @@ class SystemRole:
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> dict:
     """
     Validate JWT Bearer Token and return authenticated user dictionary from database.
     Enforces active user account check.
     """
+    token = credentials.credentials if credentials else None
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -75,14 +76,14 @@ async def get_current_user(
 
 
 async def get_optional_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> dict | None:
     """Optional authentication for endpoints that support both anonymous and logged-in users."""
-    if not token:
+    if not credentials:
         return None
     try:
-        return await get_current_user(token=token, db=db)
+        return await get_current_user(credentials=credentials, db=db)
     except HTTPException:
         return None
 
