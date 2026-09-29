@@ -1,9 +1,10 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
+from schemas.auth import NewPassword
 from utils.sanitizer import validate_safe_link
 
 # Rendered as <a href> in the admin UI: only http(s) or scheme-less links
@@ -71,7 +72,7 @@ class MemberCreate(BaseModel):
     status: MemberStatus = MemberStatus.AKTIF
     join_date: str | None = None
     create_erp_account: bool = False
-    erp_password: str | None = None
+    erp_password: NewPassword | None = None
     erp_role: str | None = "PENGURUS"
 
 
@@ -102,7 +103,7 @@ class MemberUpdate(BaseModel):
     status: MemberStatus | None = None
     join_date: str | None = None
     create_erp_account: bool | None = None
-    erp_password: str | None = None
+    erp_password: NewPassword | None = None
     erp_role: str | None = None
 
 
@@ -127,11 +128,11 @@ class PublicOrganizationMember(BaseModel):
 
 
 class GrantERPAccessRequest(BaseModel):
-    password: str
-    role: str = "PENGURUS"
+    password: NewPassword
+    role: Literal["PENGURUS", "SUPERADMIN"] = "PENGURUS"
 
 
 class ResetMemberPasswordRequest(BaseModel):
-    new_password: str
+    new_password: NewPassword
 
 

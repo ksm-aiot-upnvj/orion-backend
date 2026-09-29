@@ -205,8 +205,15 @@ class AuthService:
             updates.append("full_name = :full_name")
             params["full_name"] = sanitize_text(data.full_name)
         if data.email is not None:
+            email = sanitize_text(data.email)
+            taken = await self.session.execute(
+                text("SELECT 1 FROM users WHERE LOWER(email) = LOWER(:email) AND id <> :user_id"),
+                {"email": email, "user_id": user_id},
+            )
+            if taken.first():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email sudah digunakan oleh akun lain.")
             updates.append("email = :email")
-            params["email"] = sanitize_text(data.email)
+            params["email"] = email
         storage = StorageService()
         promoted_avatar = None
         previous_avatar = None

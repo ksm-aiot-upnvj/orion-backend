@@ -1,6 +1,11 @@
 import uuid
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+from utils.security import validate_new_password
+
+NewPassword = Annotated[str, AfterValidator(validate_new_password)]
 
 
 class LoginRequest(BaseModel):
@@ -22,13 +27,13 @@ class UserOut(BaseModel):
     is_active: bool
 
 class ProfileUpdate(BaseModel):
-    full_name: str | None = None
-    email: str | None = None
-    avatar: str | None = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=150)
+    email: EmailStr | None = Field(default=None, max_length=150)
+    avatar: str | None = Field(default=None, max_length=255)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str
+    new_password: NewPassword
 
 class LoginResponse(BaseModel):
     access_token: str

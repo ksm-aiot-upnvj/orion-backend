@@ -73,3 +73,16 @@ def decode_refresh_token(token: str) -> dict[str, Any] | None:
         return payload
     except jwt.PyJWTError:
         return None
+
+
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_BYTES = 72  # bcrypt only accepts 72 bytes; bcrypt>=5 raises ValueError beyond that
+
+
+def validate_new_password(password: str) -> str:
+    """Password policy for newly set passwords (pydantic AfterValidator)."""
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise ValueError(f"Password minimal {PASSWORD_MIN_LENGTH} karakter.")
+    if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        raise ValueError(f"Password maksimal {PASSWORD_MAX_BYTES} byte.")
+    return password
