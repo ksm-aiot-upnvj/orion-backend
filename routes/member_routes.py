@@ -1,4 +1,5 @@
 import io
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,9 @@ from utils.auth_deps import can_manage_members, require_pengurus
 from utils.excel_importer import ExcelMemberImporter
 
 router = APIRouter(prefix="/members", tags=["Members & Alumni"])
+logger = logging.getLogger("orion.members")
+
+MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 
 
 @router.get("", response_model=list[MemberResponse])
@@ -177,17 +181,22 @@ async def import_members_excel(
     Upload and import members spreadsheet into PostgreSQL using raw SQL.
     Enforced RBAC: SUPERADMIN or ADMIN_BPH.
     """
-    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Format file harus berupa Excel (.xlsx / .xls)")
+    # openpyxl reads only the Office Open XML formats; legacy .xls was accepted here but could never parse
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Format file harus berupa Excel (.xlsx)")
 
-    content = await file.read()
-    file_bytes = io.BytesIO(content)
+    content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Ukuran file Excel maksimal 5MB.")
     try:
-        members_data = ExcelMemberImporter.parse_excel(file_bytes, sheet_name=sheet_name)
-        result = await ExcelMemberImporter.import_to_database(db, members_data, actor=current_user)
-        return result
+        members_data = ExcelMemberImporter.parse_excel(io.BytesIO(content), sheet_name=sheet_name)
+    except ValueError as e:
+        # parse_excel raises ValueError with a user-facing message (e.g. missing sheet)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal memproses Excel: {e!s}") from e
+        logger.exception("Excel import parse failed")
+        raise HTTPException(status_code=400, detail="File Excel tidak dapat dibaca atau formatnya tidak valid.") from e
+    return await ExcelMemberImporter.import_to_database(db, members_data, actor=current_user)
 
 
 @router.post("/{identifier}/access")

@@ -99,3 +99,29 @@ async def test_import_escapes_html_and_drops_script_links():
         stored = res.mappings().one()
     assert "<" not in stored["full_name"] and "<" not in stored["project_experience"]
     assert stored["portfolio_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_import_endpoint_rejects_oversized_and_garbage_files_without_leaking():
+    from config.config import settings
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/orion/api/v1/auth/login", json={"student_id": settings.SUPERADMIN_NIM, "password": settings.SUPERADMIN_PW}
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        big = ("big.xlsx", b"0" * (5 * 1024 * 1024 + 1), "application/octet-stream")
+        res = await ac.post("/orion/api/v1/members/imports", headers=headers, files={"file": big})
+        assert res.status_code == 413
+        garbage = ("bad.xlsx", b"PK\x03\x04 not really a workbook", "application/octet-stream")
+        res = await ac.post("/orion/api/v1/members/imports", headers=headers, files={"file": garbage})
+        assert res.status_code == 400
+        assert "Traceback" not in res.text and "zipfile" not in res.text.lower()
+        res = await ac.post("/orion/api/v1/members/imports", headers=headers, files={"file": ("a.xls", b"x", "x")})
+        assert res.status_code == 400
+
+
+def test_openpyxl_uses_defusedxml():
+    import openpyxl.xml
+
+    assert openpyxl.xml.DEFUSEDXML is True
