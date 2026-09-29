@@ -1,8 +1,13 @@
 import uuid
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
+from utils.sanitizer import validate_safe_link
+
+# Rendered as <a href> in the admin UI: only http(s) or scheme-less links
+SafeLink = Annotated[str | None, AfterValidator(validate_safe_link)]
 
 
 class MemberBase(BaseModel):
@@ -56,7 +61,7 @@ class MemberCreate(BaseModel):
     tools_frameworks: str | None = None
     project_experience: str | None = None
     hackathon_experience: str | None = None
-    portfolio_url: str | None = None
+    portfolio_url: SafeLink = None
     routine_commitment: str | None = None
     weekly_free_time: str | None = None
     other_activities: str | None = None
@@ -88,7 +93,7 @@ class MemberUpdate(BaseModel):
     tools_frameworks: str | None = None
     project_experience: str | None = None
     hackathon_experience: str | None = None
-    portfolio_url: str | None = None
+    portfolio_url: SafeLink = None
     routine_commitment: str | None = None
     weekly_free_time: str | None = None
     other_activities: str | None = None

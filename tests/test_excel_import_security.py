@@ -82,3 +82,20 @@ async def test_import_cannot_change_importers_own_role():
         res = await session.execute(text("SELECT role, division FROM members WHERE student_id = :s"), {"s": STAFF_NIM})
         row = res.mappings().one()
     assert (row["role"], row["division"]) == ("Staff", "PSDM")
+
+
+@pytest.mark.asyncio
+async def test_import_escapes_html_and_drops_script_links():
+    row = _row(STAFF_NIM, "Staff")
+    row["full_name"] = '<img src=x onerror="alert(1)">'
+    row["project_experience"] = "<script>steal()</script>"
+    row["portfolio_url"] = "javascript:alert(document.domain)"
+    async with AsyncSessionLocal() as session:
+        await ExcelMemberImporter.import_to_database(session, [row])
+        res = await session.execute(
+            text("SELECT full_name, project_experience, portfolio_url FROM members WHERE student_id = :s"),
+            {"s": STAFF_NIM},
+        )
+        stored = res.mappings().one()
+    assert "<" not in stored["full_name"] and "<" not in stored["project_experience"]
+    assert stored["portfolio_url"] is None

@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from models.enums import Division, MemberRole, ResearchField, SelectionStatus, StudyProgram
+from schemas.member import SafeLink
 
 
 class RegistrationCreate(BaseModel):
@@ -18,7 +19,7 @@ class RegistrationCreate(BaseModel):
     motivation: str | None = None
     photo: str | None = None
     cv_url: str | None = None
-    portfolio_url: str | None = None
+    portfolio_url: SafeLink = None
     consent_given: bool = True
 
     @field_validator("motivation")

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.config import settings
 from config.db import AsyncSessionLocal
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
+from utils.sanitizer import is_safe_link, sanitize_dict_fields
 from utils.security import hash_password
 from utils.uuid_utils import generate_uuid7
 
@@ -193,6 +194,11 @@ class ExcelMemberImporter:
         used_member_ids = set(existing_by_student.values())
 
         for idx, m in enumerate(members, start=1):
+            # Spreadsheet cells come from form respondents: escape like every other write path
+            # (the admin UI renders these fields with innerHTML) and drop non-http(s) links
+            m = sanitize_dict_fields(m)
+            if not is_safe_link(m.get("portfolio_url")):
+                m["portfolio_url"] = None
             student_id = m["student_id"]
             if actor and not actor_is_superadmin and student_id == actor_student_id and student_id in existing_rows:
                 # Keep the importer's own privilege-bearing fields unchanged

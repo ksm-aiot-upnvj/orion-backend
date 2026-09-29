@@ -30,3 +30,24 @@ def sanitize_dict_fields(data: dict[str, Any], fields_to_sanitize: list[str] | N
         if isinstance(val, str) and (fields_to_sanitize is None or key in fields_to_sanitize):
             sanitized[key] = sanitize_text(val)
     return sanitized
+
+
+_SCHEME_RE = re.compile(r"^\s*([a-zA-Z][a-zA-Z0-9+.-]*):")
+
+
+def is_safe_link(url: str | None) -> bool:
+    """
+    True for links that are safe to put in an <a href>: empty, http(s)://..., or scheme-less
+    (the UI prefixes https://). Rejects javascript:, data:, vbscript: and any other scheme.
+    """
+    if not url:
+        return True
+    match = _SCHEME_RE.match(url)
+    return match is None or match.group(1).lower() in ("http", "https")
+
+
+def validate_safe_link(url: str | None) -> str | None:
+    """Pydantic validator wrapper around is_safe_link."""
+    if not is_safe_link(url):
+        raise ValueError("Tautan harus berupa URL http:// atau https://.")
+    return url
