@@ -23,6 +23,13 @@ class SystemRole:
     MEMBER = "MEMBER"               # Anggota Biasa / Calon
 
 
+def is_superadmin_user(user: dict | None) -> bool:
+    """True when the authenticated user dict belongs to a superadmin."""
+    if not user:
+        return False
+    return bool(user.get("is_superadmin")) or (user.get("role") or "").upper() == SystemRole.SUPERADMIN
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db)

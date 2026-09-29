@@ -8,9 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.enums import MemberRole, MemberStatus, StudyProgram
 from services.audit_log_service import log_audit_event
 from services.storage_service import StorageService, release_upload
+from utils.auth_deps import is_superadmin_user
 from utils.sanitizer import sanitize_dict_fields
 from utils.security import hash_password
 from utils.uuid_utils import generate_uuid7
+
+ERP_ROLE_PENGURUS = "PENGURUS"
+ERP_ROLE_SUPERADMIN = "SUPERADMIN"
+ERP_ROLES = {ERP_ROLE_PENGURUS, ERP_ROLE_SUPERADMIN}
+# Member fields that feed RBAC decisions (utils/auth_deps.py)
+PRIVILEGED_MEMBER_FIELDS = ("role", "division", "status")
 
 
 class MemberService:
@@ -178,6 +185,14 @@ class MemberService:
 
     async def create_member(self, member_data: dict, actor: dict | None = None) -> dict:
         """Insert or update member using raw SQL RETURNING * with sanitization and audit logging."""
+        # ERP credentials must not be HTML-escaped (the password would be hashed in escaped form)
+        create_erp = member_data.pop("create_erp_account", None)
+        erp_pwd = member_data.pop("erp_password", None)
+        erp_role = member_data.pop("erp_role", None)
+        if create_erp and erp_pwd:
+            # Fail before writing the member when the actor may not grant this access
+            await self._authorize_erp_change(member_data.get("student_id"), actor, erp_role or ERP_ROLE_PENGURUS)
+
         # Sanitize text fields to prevent injection
         member_data = sanitize_dict_fields(member_data)
 
@@ -324,43 +339,10 @@ class MemberService:
         if previous_avatar and previous_avatar != avatar_value:
             await release_upload(self.session, previous_avatar)
 
-        # Handle ERP account creation if requested
-        if member_data.get("create_erp_account") and member_data.get("erp_password"):
-            erp_pwd = str(member_data["erp_password"])
-            erp_role = member_data.get("erp_role") or "PENGURUS"
-            hashed_pwd = hash_password(erp_pwd)
-            is_superadmin = erp_role == "SUPERADMIN"
-
-            user_stmt = text(
-                """
-                INSERT INTO users (id, member_id, student_id, full_name, email, hashed_password, role, division, is_superadmin, is_active, created_at)
-                VALUES (:u_id, :m_id, :student_id, :full_name, :email, :hashed_password, :role, :division, :is_superadmin, true, NOW())
-                ON CONFLICT (student_id) DO UPDATE SET
-                    member_id = EXCLUDED.member_id,
-                    full_name = EXCLUDED.full_name,
-                    email = EXCLUDED.email,
-                    hashed_password = EXCLUDED.hashed_password,
-                    role = EXCLUDED.role,
-                    division = EXCLUDED.division,
-                    is_superadmin = EXCLUDED.is_superadmin,
-                    is_active = true
-                """
-            )
-            await self.session.execute(
-                user_stmt,
-                {
-                    "u_id": generate_uuid7(),
-                    "m_id": created_row["id"],
-                    "student_id": created_row["student_id"],
-                    "full_name": created_row["full_name"],
-                    "email": created_row["email"],
-                    "hashed_password": hashed_pwd,
-                    "role": erp_role,
-                    "division": created_row.get("division"),
-                    "is_superadmin": is_superadmin,
-                },
-            )
-            await self.session.commit()
+        # Handle ERP account creation if requested (same authorization rules as the /access endpoint)
+        if create_erp and erp_pwd:
+            erp_role = erp_role or ERP_ROLE_PENGURUS
+            await self.grant_erp_access(created_row["student_id"], password=erp_pwd, erp_role=erp_role, actor=actor)
             created_row["has_erp_access"] = True
             created_row["user_role"] = erp_role
             created_row["user_is_active"] = True
@@ -389,6 +371,17 @@ class MemberService:
         create_erp = update_data.pop("create_erp_account", None)
         erp_pwd = update_data.pop("erp_password", None)
         erp_role = update_data.pop("erp_role", None)
+
+        # Managers may not raise their own privileges (role/division drive RBAC) or change their own status
+        if actor and not is_superadmin_user(actor) and existing["student_id"] == actor.get("student_id"):
+            changed = [f for f in PRIVILEGED_MEMBER_FIELDS if update_data.get(f) is not None]
+            if changed:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Akses Ditolak: Anda tidak dapat mengubah jabatan, divisi, atau status keanggotaan Anda sendiri.",
+                )
+        if create_erp and erp_pwd:
+            await self._authorize_erp_change(existing["student_id"], actor, erp_role or ERP_ROLE_PENGURUS)
 
         update_data = sanitize_dict_fields(update_data)
         fields = []
@@ -474,7 +467,7 @@ class MemberService:
 
         # If explicit ERP credentials provided in update
         if create_erp and erp_pwd:
-            role_val = erp_role or "PENGURUS"
+            role_val = erp_role or ERP_ROLE_PENGURUS
             await self.grant_erp_access(identifier, password=erp_pwd, erp_role=role_val, actor=actor)
             updated_row["has_erp_access"] = True
             updated_row["user_role"] = role_val
@@ -494,20 +487,44 @@ class MemberService:
 
         return updated_row
 
+    async def _authorize_erp_change(self, student_id: str | None, actor: dict | None, erp_role: str | None = None) -> None:
+        """
+        Only a superadmin may grant SUPERADMIN, or change the login account of a superadmin.
+        Nobody but a superadmin may change their own ERP account through the member endpoints.
+        actor=None is an internal/system call and is allowed.
+        """
+        if erp_role is not None and erp_role not in ERP_ROLES:
+            raise HTTPException(status_code=400, detail=f"Role ERP tidak valid. Pilihan: {', '.join(sorted(ERP_ROLES))}.")
+        if actor is None or is_superadmin_user(actor):
+            return
+        if erp_role == ERP_ROLE_SUPERADMIN:
+            raise HTTPException(status_code=403, detail="Akses Ditolak: Hanya Superadmin yang dapat memberikan akses SUPERADMIN.")
+        if student_id and student_id == actor.get("student_id"):
+            raise HTTPException(status_code=403, detail="Akses Ditolak: Anda tidak dapat mengubah akses ERP akun Anda sendiri.")
+        if student_id:
+            target = await self.session.execute(
+                text("SELECT is_superadmin, role FROM users WHERE student_id = :student_id"),
+                {"student_id": student_id},
+            )
+            row = target.mappings().first()
+            if row and (row["is_superadmin"] or (row["role"] or "").upper() == ERP_ROLE_SUPERADMIN):
+                raise HTTPException(status_code=403, detail="Akses Ditolak: Akun Superadmin hanya dapat diubah oleh Superadmin.")
+
     async def grant_erp_access(
         self,
         identifier: str,
         password: str,
-        erp_role: str = "PENGURUS",
+        erp_role: str = ERP_ROLE_PENGURUS,
         actor: dict | None = None,
     ) -> dict:
         """Create or activate user account for member to access ERP dashboard."""
         member = await self.get_member_by_identifier(identifier)
         if not member:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
+        await self._authorize_erp_change(member["student_id"], actor, erp_role)
 
         hashed_pwd = hash_password(password)
-        is_superadmin = erp_role == "SUPERADMIN"
+        is_superadmin = erp_role == ERP_ROLE_SUPERADMIN
 
         user_stmt = text(
             """
@@ -565,6 +582,7 @@ class MemberService:
         member = await self.get_member_by_identifier(identifier)
         if not member:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
+        await self._authorize_erp_change(member["student_id"], actor)
 
         stmt = text(
             """
@@ -603,6 +621,7 @@ class MemberService:
         member = await self.get_member_by_identifier(identifier)
         if not member:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
+        await self._authorize_erp_change(member["student_id"], actor)
 
         hashed_pwd = hash_password(new_password)
 
