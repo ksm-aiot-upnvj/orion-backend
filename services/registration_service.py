@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, SelectionStatus
 from services.audit_log_service import log_audit_event
 from services.member_id import member_id_year, next_member_id
-from services.storage_service import StorageService
+from services.storage_service import StorageService, release_upload
 from utils.sanitizer import sanitize_dict_fields
 from utils.uuid_utils import generate_uuid7
 
@@ -318,20 +318,14 @@ class RegistrationService:
         if not reg:
             return False
 
-        # Unlink physical photo & CV files if stored locally (Right to Erasure)
-        is_accepted = str(reg.get("status", "")).lower() == SelectionStatus.ACCEPTED.value.lower()
-        if (
-            reg.get("photo")
-            and not is_accepted
-            and not await self._is_avatar_referenced_by_member(reg["photo"])
-        ):
-            StorageService().delete_avatar(reg["photo"])
-        if reg.get("cv_url"):
-            StorageService().delete_cv(reg["cv_url"])
-
         stmt = text("DELETE FROM registrations WHERE id = :id")
         await self.session.execute(stmt, {"id": reg["id"]})
         await self.session.commit()
+
+        # Unlink photo & CV only after the delete is committed, and only if no other record uses them
+        # (an accepted candidate's photo is the member's avatar) - Right to Erasure
+        await release_upload(self.session, reg.get("photo"))
+        await release_upload(self.session, reg.get("cv_url"))
 
         if actor:
             await log_audit_event(
@@ -380,25 +374,17 @@ class RegistrationService:
         if not rows:
             return 0
 
-        storage_service = StorageService()
-        deleted_ids = []
-        deleted_student_ids = []
-        for row in rows:
-            is_accepted = str(row.get("status", "")).lower() == SelectionStatus.ACCEPTED.value.lower()
-            if (
-                row.get("photo")
-                and not is_accepted
-                and not await self._is_avatar_referenced_by_member(row["photo"])
-            ):
-                storage_service.delete_avatar(row["photo"])
-            if row.get("cv_url"):
-                storage_service.delete_cv(row["cv_url"])
-            deleted_ids.append(row["id"])
-            deleted_student_ids.append(row["student_id"])
+        deleted_ids = [row["id"] for row in rows]
+        deleted_student_ids = [row["student_id"] for row in rows]
 
         del_stmt = text("DELETE FROM registrations WHERE id = ANY(:del_ids)")
         await self.session.execute(del_stmt, {"del_ids": deleted_ids})
         await self.session.commit()
+
+        # Unlink files after the commit, keeping any still referenced (e.g. by a member avatar)
+        for row in rows:
+            await release_upload(self.session, row.get("photo"))
+            await release_upload(self.session, row.get("cv_url"))
 
         if actor:
             await log_audit_event(
@@ -413,9 +399,3 @@ class RegistrationService:
             )
 
         return len(deleted_ids)
-
-    async def _is_avatar_referenced_by_member(self, avatar_path: str) -> bool:
-        """Keep an approved member's avatar file when its source registration is deleted."""
-        stmt = text("SELECT EXISTS (SELECT 1 FROM members WHERE avatar = :avatar_path)")
-        result = await self.session.execute(stmt, {"avatar_path": avatar_path})
-        return bool(result.scalar())
