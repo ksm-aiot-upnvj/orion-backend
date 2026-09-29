@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.enums import MemberRole, MemberStatus, StudyProgram
 from services.audit_log_service import log_audit_event
-from services.member_id import member_id_year, next_member_id
+from services.member_id import member_id_year, next_member_id, reserve_member_id
 from services.storage_service import StorageService, release_upload
 from utils.auth_deps import is_superadmin_user
 from utils.sanitizer import sanitize_dict_fields
@@ -201,6 +201,8 @@ class MemberService:
         if not member_id:
             year = member_id_year(member_data.get("intake_period"), member_data.get("student_id"))
             member_id = await next_member_id(self.session, year)
+        else:
+            await reserve_member_id(self.session, member_id)
 
         # Normalize enum/array values
         def get_enum_val(v, default_val):

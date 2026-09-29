@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from sqlalchemy import text
@@ -18,14 +19,38 @@ def member_id_year(intake_period: str | None, student_id: str | None) -> str:
 
 
 async def next_member_id(session: AsyncSession, year: str) -> str:
-    """Next free AIOT-<year>-NNN: highest existing number for that year + 1 (a COUNT would reuse deleted IDs)."""
+    """Allocate the next permanent AIOT ID for a year, atomically and without reusing deleted IDs."""
     result = await session.execute(
-        text("SELECT member_id FROM members WHERE member_id LIKE :prefix"), {"prefix": f"AIOT-{year}-%"}
+        text(
+            """
+            INSERT INTO member_id_counters (intake_year, last_issued)
+            VALUES (:year, 1)
+            ON CONFLICT (intake_year) DO UPDATE
+            SET last_issued = member_id_counters.last_issued + 1
+            RETURNING last_issued
+            """
+        ),
+        {"year": year},
     )
-    max_num = 0
-    for member_id in result.scalars().all():
-        try:
-            max_num = max(max_num, int(str(member_id).split("-")[-1]))
-        except ValueError:
-            continue
-    return f"AIOT-{year}-{str(max_num + 1).zfill(3)}"
+    number = result.scalar_one()
+    return f"AIOT-{year}-{str(number).zfill(3)}"
+
+
+async def reserve_member_id(session: AsyncSession, member_id: str | None) -> None:
+    """Advance the permanent counter when a caller supplies a standard AIOT ID explicitly."""
+    match = re.fullmatch(r"AIOT-(\d{4})-(\d+)", str(member_id or ""))
+    if not match:
+        return
+
+    year, number = match.groups()
+    await session.execute(
+        text(
+            """
+            INSERT INTO member_id_counters (intake_year, last_issued)
+            VALUES (:year, :number)
+            ON CONFLICT (intake_year) DO UPDATE
+            SET last_issued = GREATEST(member_id_counters.last_issued, EXCLUDED.last_issued)
+            """
+        ),
+        {"year": year, "number": int(number)},
+    )

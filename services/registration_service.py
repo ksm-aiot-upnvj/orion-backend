@@ -180,6 +180,17 @@ class RegistrationService:
             raise HTTPException(status_code=404, detail="Data pendaftar tidak ditemukan")
 
         if reg["status"] == SelectionStatus.ACCEPTED.value and reg.get("member_id"):
+            # Clean up CVs retained by approvals created before CV retention was enforced.
+            cv_path = reg.get("cv_url")
+            if cv_path:
+                result = await self.session.execute(
+                    text("UPDATE registrations SET cv_url = NULL, updated_at = NOW() WHERE id = :id RETURNING *"),
+                    {"id": reg["id"]},
+                )
+                await self.session.commit()
+                accepted_reg = _mapping_to_dict(result.mappings().first())
+                await release_upload(self.session, cv_path)
+                return accepted_reg or reg
             return reg
 
         # Reuse the member ID when this NIM is already a member, otherwise take the next free one for the year
@@ -196,7 +207,8 @@ class RegistrationService:
         update_stmt = text(
             """
             UPDATE registrations
-            SET status = :status, member_id = :member_id, review_note = :review_note, updated_at = NOW()
+            SET status = :status, member_id = :member_id, review_note = :review_note,
+                cv_url = NULL, updated_at = NOW()
             WHERE id = :id
             RETURNING *
             """
@@ -250,6 +262,9 @@ class RegistrationService:
 
         await self.session.commit()
 
+        # The accepted member only retains the registration photo as avatar, not its CV.
+        await release_upload(self.session, reg.get("cv_url"))
+
         # Audit log
         await log_audit_event(
             session=self.session,
@@ -280,7 +295,8 @@ class RegistrationService:
         stmt = text(
             """
             UPDATE registrations
-            SET status = :status, review_note = :review_note, updated_at = NOW()
+            SET status = :status, review_note = :review_note,
+                cv_url = NULL, updated_at = NOW()
             WHERE id = :id
             RETURNING *
             """
@@ -297,6 +313,9 @@ class RegistrationService:
         rejected_reg = _mapping_to_dict(res.mappings().first())
         if rejected_reg is None:
             raise HTTPException(status_code=500, detail="Status pendaftaran gagal diperbarui")
+
+        # Rejected applicants have no remaining use for their CV.
+        await release_upload(self.session, reg.get("cv_url"))
 
         # Audit log
         await log_audit_event(
