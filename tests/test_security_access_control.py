@@ -102,3 +102,24 @@ async def test_member_manager_cannot_escalate_privileges():
         # Legitimate manager operation still works
         res = await ac.post(f"{API}/members/{TARGET_NIM}/access", headers=manager, json={"password": "Target#2026pw", "role": "PENGURUS"})
         assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["MEMBER", "Anggota", "ANGGOTA", "", None, "Guest", "user"])
+async def test_require_pengurus_denies_non_pengurus_roles(role):
+    from fastapi import HTTPException
+
+    from utils.auth_deps import require_pengurus
+
+    with pytest.raises(HTTPException) as exc:
+        await require_pengurus({"role": role, "is_superadmin": False})
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["Ketua", "Wakil Ketua", "Sekretaris", "Bendahara", "Kepala Divisi", "Staff", "PENGURUS"])
+async def test_require_pengurus_allows_pengurus_roles(role):
+    from utils.auth_deps import require_pengurus
+
+    user = {"role": role, "is_superadmin": False}
+    assert await require_pengurus(user) is user

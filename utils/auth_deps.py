@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.db import get_db
+from models.enums import MemberRole
 from services.auth_service import AuthService
 from utils.security import decode_access_token
 
@@ -21,6 +22,14 @@ class SystemRole:
     KADIV = "KADIV"                 # Kepala Divisi (Riset, PSDM, Humas, dll.)
     PENGURUS = "PENGURUS"           # Seluruh Pengurus Aktif KSM
     MEMBER = "MEMBER"               # Anggota Biasa / Calon
+
+
+# Roles (upper-cased) that may use the pengurus dashboard: every organisational MemberRole except Anggota,
+# plus the ERP/system roles stored in users.role. Matches the frontend route guard in src/modules/auth.js.
+PENGURUS_ROLES = frozenset(
+    {role.value.upper() for role in MemberRole if role != MemberRole.ANGGOTA}
+    | {SystemRole.ADMIN_BPH, SystemRole.KADIV, SystemRole.PENGURUS}
+)
 
 
 def is_superadmin_user(user: dict | None) -> bool:
@@ -100,11 +109,12 @@ async def require_pengurus(current_user: dict = Depends(get_current_user)) -> di
     Enforce that authenticated user is an active Pengurus / BPH / Superadmin.
     Anggota Umum (role == 'Anggota') is completely denied access (HTTP 403 Forbidden).
     """
-    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
+    if is_superadmin_user(current_user):
         return current_user
 
-    role = (current_user.get("role") or "").strip()
-    if role.lower() == "anggota" or not role:
+    # Allow-list (fail closed): an unexpected role string such as "MEMBER" must not pass
+    role = (current_user.get("role") or "").strip().upper()
+    if role not in PENGURUS_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Akses Ditolak: Modul ini hanya dapat diakses oleh Pengurus KSM AIoT.",
