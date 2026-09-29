@@ -95,6 +95,11 @@ class AuditLogService:
 
         except Exception as e:  # noqa: BLE001 - Audit logging should never crash the main transaction
             logger.error("Gagal mencatat audit log: %s | Action: %s | Resource: %s", e, action, resource_type)
+            # Leave the session usable: without a rollback every later statement in this request fails
+            try:
+                await self.session.rollback()
+            except Exception as rollback_error:  # noqa: BLE001
+                logger.error("Rollback setelah kegagalan audit log gagal: %s", rollback_error)
             return None
 
     async def get_logs(
