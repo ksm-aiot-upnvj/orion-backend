@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
+from schemas.alumni_profile import AlumniProfileResponse
 from schemas.auth import NewPassword
 from utils.sanitizer import validate_safe_link
 
@@ -114,6 +115,7 @@ class MemberResponse(MemberBase):
     has_erp_access: bool = False
     user_role: str | None = None
     user_is_active: bool | None = None
+    alumni_profile: AlumniProfileResponse | None = None
 
 
 class PublicOrganizationMember(BaseModel):

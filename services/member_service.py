@@ -39,9 +39,11 @@ class MemberService:
                    m.avatar, m.status, m.join_date, m.created_at,
                    (u.id IS NOT NULL AND u.is_active = true) AS has_erp_access,
                    u.role AS user_role,
-                   u.is_active AS user_is_active
+                   u.is_active AS user_is_active,
+                   to_jsonb(ap) AS alumni_profile
             FROM members m
             LEFT JOIN users u ON (m.id = u.member_id OR m.student_id = u.student_id)
+            LEFT JOIN alumni_profiles ap ON (m.status = 'Alumni' AND ap.member_id = m.id)
             WHERE 1=1
         """
         params = {}
@@ -76,7 +78,7 @@ class MemberService:
         return dict(profile) if profile else None
 
     async def upsert_alumni_profile(self, identifier: str, profile_data: dict, actor: dict | None = None) -> dict:
-        member = await self.get_member_by_identifier(identifier)
+        member = await self.get_member_by_identifier(identifier, for_update=True)
         if not member:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
         if member["status"] != MemberStatus.ALUMNI.value:
@@ -93,7 +95,7 @@ class MemberService:
             text(
                 """
                 INSERT INTO alumni_profiles (
-                    id, member_id, graduation_year, current_company, current_role,
+                    id, member_id, graduation_year, current_company, "current_role",
                     linkedin_url, testimonial, visibility, consent_given, created_at, updated_at
                 ) VALUES (
                     :id, :member_id, :graduation_year, :current_company, :current_role,
@@ -102,7 +104,7 @@ class MemberService:
                 ON CONFLICT (member_id) DO UPDATE SET
                     graduation_year = EXCLUDED.graduation_year,
                     current_company = EXCLUDED.current_company,
-                    current_role = EXCLUDED.current_role,
+                    "current_role" = EXCLUDED."current_role",
                     linkedin_url = EXCLUDED.linkedin_url,
                     testimonial = EXCLUDED.testimonial,
                     visibility = EXCLUDED.visibility,

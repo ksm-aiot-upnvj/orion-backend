@@ -98,6 +98,19 @@ async def test_member_erp_access_lifecycle():
         )
         assert forbidden_grant.status_code == 409
 
+        profile_url = "/orion/api/v1/members/2410511888/alumni-profile"
+        missing_consent = await ac.put(profile_url, json={"visibility": True}, headers=headers)
+        assert missing_consent.status_code == 422
+        profile = await ac.put(
+            profile_url,
+            json={"current_company": "Riset & Teknologi", "current_role": "Engineer", "graduation_year": "2026"},
+            headers=headers,
+        )
+        assert profile.status_code == 200, profile.text
+        directory = await ac.get("/orion/api/v1/members?status=Alumni", headers=headers)
+        alumni = next(member for member in directory.json() if member["student_id"] == "2410511888")
+        assert alumni["alumni_profile"]["current_company"] == "Riset & Teknologi"
+
         # 10. Clean up test member
         del_res = await ac.delete("/orion/api/v1/members/2410511888", headers=headers)
         assert del_res.status_code == 200
