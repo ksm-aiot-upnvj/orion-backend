@@ -122,3 +122,8 @@ class BulkDeleteRegistrationsResponse(BaseModel):
     status: str = "success"
     deleted_count: int
     message: str
+
+
+class RegistrationExportRequest(BaseModel):
+    format: Literal["csv", "xlsx"]
+    registration_ids: list[uuid.UUID] = Field(min_length=1, max_length=100_000)

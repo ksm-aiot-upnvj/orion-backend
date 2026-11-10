@@ -165,6 +165,19 @@ class RegistrationService:
         result = await self.session.execute(text(query_str), params)
         return [dict(row) for row in result.mappings().all()]
 
+    async def get_export_rows(self, identifiers: list[uuid.UUID]) -> list[dict]:
+        result = await self.session.execute(
+            text("""
+                SELECT full_name, student_id, program_of_study, interest_track, contact_info,
+                       email, submit_date, status
+                FROM registrations
+                WHERE id = ANY(:ids)
+                ORDER BY created_at DESC, id
+            """),
+            {"ids": identifiers},
+        )
+        return [dict(row) for row in result.mappings()]
+
     async def approve_registration(
         self,
         identifier: str,

@@ -2,7 +2,8 @@ import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +15,11 @@ from schemas.registration import (
     IntakeStatusResponse,
     IntakeStatusUpdate,
     RegistrationCreate,
+    RegistrationExportRequest,
     RegistrationResponse,
     RegistrationReview,
 )
+from services.registration_export import render_registration_export
 from services.registration_service import RegistrationService
 from utils.auth_deps import can_manage_selection, require_pengurus
 from utils.client_ip import get_client_ip
@@ -166,6 +169,31 @@ async def list_registrations(
     service = RegistrationService(db)
     regs = await service.get_all_registrations(status_filter=status)
     return [RegistrationResponse.model_validate(r) for r in regs]
+
+
+@router.post("/export", response_class=Response)
+async def export_registrations(
+    payload: RegistrationExportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(can_manage_selection),
+):
+    rows = await RegistrationService(db).get_export_rows(payload.registration_ids)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Data pendaftar untuk ekspor sudah tidak tersedia.")
+    if len(rows) != len(set(payload.registration_ids)):
+        raise HTTPException(status_code=409, detail="Daftar pendaftar berubah. Muat ulang data sebelum mengekspor.")
+    content = await run_in_threadpool(render_registration_export, rows, payload.format)
+    media_type = (
+        "text/csv; charset=utf-8"
+        if payload.format == "csv"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"seleksi-anggota-{datetime.now(WIB).date().isoformat()}.{payload.format}"
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
 
 
 @router.get("/{identifier}", response_model=RegistrationResponse)
