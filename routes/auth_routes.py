@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.db import get_db
 from schemas.auth import (
     ChangePasswordRequest,
+    ERPSession,
     LoginRequest,
     LoginResponse,
     ProfileUpdate,
@@ -13,7 +14,7 @@ from schemas.auth import (
 )
 from services.audit_log_service import log_audit_event
 from services.auth_service import AuthService
-from utils.auth_deps import get_current_user
+from utils.auth_deps import can_manage_recruitment, get_current_user, require_pengurus
 from utils.client_ip import get_client_ip
 from utils.rate_limiter import rate_limit
 
@@ -61,6 +62,14 @@ async def refresh_token(
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Get currently logged-in pengurus profile."""
     return UserOut.model_validate(current_user)
+
+
+@router.get("/session", response_model=ERPSession)
+async def get_erp_session(current_user: dict = Depends(require_pengurus)):
+    return ERPSession.model_validate({
+        **current_user,
+        "can_manage_recruitment": can_manage_recruitment(current_user),
+    })
 
 
 @router.put("/me", response_model=UserOut)

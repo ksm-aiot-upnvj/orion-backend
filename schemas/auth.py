@@ -26,6 +26,10 @@ class UserOut(BaseModel):
     is_superadmin: bool = False
     is_active: bool
 
+class ERPSession(UserOut):
+    can_manage_recruitment: bool
+
+
 class ProfileUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=150)
     email: EmailStr | None = Field(default=None, max_length=150)

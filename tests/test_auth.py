@@ -19,6 +19,13 @@ async def test_auth_login_superadmin():
         assert data["user"]["role"] in ["Ketua", "SUPERADMIN"]
         assert data["user"]["is_superadmin"] is True
         assert data["user"]["student_id"] == settings.SUPERADMIN_NIM
+        session_res = await ac.get(
+            "/orion/api/v1/auth/session",
+            headers={"Authorization": f"Bearer {data['access_token']}"},
+        )
+        assert session_res.status_code == 200
+        assert session_res.json()["can_manage_recruitment"] is True
+        assert (await ac.get("/orion/api/v1/auth/session")).status_code == 401
 
 
 @pytest.mark.asyncio

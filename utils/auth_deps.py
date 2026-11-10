@@ -24,8 +24,7 @@ class SystemRole:
     MEMBER = "MEMBER"               # Anggota Biasa / Calon
 
 
-# Roles (upper-cased) that may use the pengurus dashboard: every organisational MemberRole except Anggota,
-# plus the ERP/system roles stored in users.role. Matches the frontend route guard in src/modules/auth.js.
+# Roles (upper-cased) that may use the pengurus dashboard.
 PENGURUS_ROLES = frozenset(
     {role.value.upper() for role in MemberRole if role != MemberRole.ANGGOTA}
     | {SystemRole.ADMIN_BPH, SystemRole.KADIV, SystemRole.PENGURUS}
@@ -122,19 +121,21 @@ async def require_pengurus(current_user: dict = Depends(get_current_user)) -> di
     return current_user
 
 
+def can_manage_recruitment(user: dict) -> bool:
+    return (
+        is_superadmin_user(user)
+        or (user.get("role") or "").strip() in ("Ketua", "Wakil Ketua")
+        or (user.get("division") or "").strip() == "PSDM"
+    )
+
+
 async def can_manage_selection(current_user: dict = Depends(require_pengurus)) -> dict:
     """
     Write authorization for Candidate Selection (Intake config, Approve, Reject, Delete).
     Allowed: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
     Humas Multimedia (PDD) and other divisions are Read-Only (HTTP 403).
     """
-    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
-        return current_user
-
-    role = (current_user.get("role") or "").strip()
-    division = (current_user.get("division") or "").strip()
-
-    if role in ("Ketua", "Wakil Ketua") or division == "PSDM":
+    if can_manage_recruitment(current_user):
         return current_user
 
     raise HTTPException(
@@ -148,13 +149,7 @@ async def can_manage_members(current_user: dict = Depends(require_pengurus)) -> 
     Write authorization for Member directory (Create, Update, Delete, Import Excel, Anonymize).
     Allowed: Superadmin, Ketua, Wakil Ketua, or PSDM Division.
     """
-    if current_user.get("is_superadmin") or (current_user.get("role") or "").upper() == "SUPERADMIN":
-        return current_user
-
-    role = (current_user.get("role") or "").strip()
-    division = (current_user.get("division") or "").strip()
-
-    if role in ("Ketua", "Wakil Ketua") or division == "PSDM":
+    if can_manage_recruitment(current_user):
         return current_user
 
     raise HTTPException(
