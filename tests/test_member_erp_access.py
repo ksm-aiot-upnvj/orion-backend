@@ -1,7 +1,9 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
 from config.config import settings
+from config.db import AsyncSessionLocal
 from main import app
 
 
@@ -97,6 +99,15 @@ async def test_member_erp_access_lifecycle():
             headers=headers,
         )
         assert forbidden_grant.status_code == 409
+
+        # Legacy rows can still have an active user flag despite the member being Alumni.
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("UPDATE users SET is_active = true WHERE student_id = '2410511888'"))
+            await session.commit()
+        old_headers = {"Authorization": f"Bearer {re_login.json()['access_token']}"}
+        assert (await ac.get("/orion/api/v1/auth/session", headers=old_headers)).status_code == 401
+        detail = await ac.get("/orion/api/v1/members/2410511888", headers=headers)
+        assert detail.json()["has_erp_access"] is False
 
         profile_url = "/orion/api/v1/members/2410511888/alumni-profile"
         missing_consent = await ac.put(profile_url, json={"visibility": True}, headers=headers)

@@ -37,8 +37,10 @@ class MemberService:
                    m.programming_languages, m.tools_frameworks, m.project_experience, m.hackathon_experience, m.portfolio_url,
                    m.routine_commitment, m.weekly_free_time, m.other_activities, m.discord_id, m.registration_timestamp,
                    m.avatar, m.status, m.join_date, m.created_at,
-                   (u.id IS NOT NULL AND u.is_active = true) AS has_erp_access,
-                   u.role AS user_role,
+                   (u.id IS NOT NULL AND u.is_active = true AND
+                    (m.status = 'Aktif' OR (m.status = 'Alumni' AND
+                     (u.is_superadmin OR UPPER(u.role) = 'SUPERADMIN')))) AS has_erp_access,
+                   CASE WHEN u.is_superadmin THEN 'SUPERADMIN' ELSE u.role END AS user_role,
                    u.is_active AS user_is_active,
                    to_jsonb(ap) AS alumni_profile
             FROM members m
@@ -126,8 +128,10 @@ class MemberService:
                    m.programming_languages, m.tools_frameworks, m.project_experience, m.hackathon_experience, m.portfolio_url,
                    m.routine_commitment, m.weekly_free_time, m.other_activities, m.discord_id, m.registration_timestamp,
                    m.avatar, m.status, m.join_date, m.created_at,
-                   (u.id IS NOT NULL AND u.is_active = true) AS has_erp_access,
-                   u.role AS user_role,
+                   (u.id IS NOT NULL AND u.is_active = true AND
+                    (m.status = 'Aktif' OR (m.status = 'Alumni' AND
+                     (u.is_superadmin OR UPPER(u.role) = 'SUPERADMIN')))) AS has_erp_access,
+                   CASE WHEN u.is_superadmin THEN 'SUPERADMIN' ELSE u.role END AS user_role,
                    u.is_active AS user_is_active,
                    u.is_superadmin AS user_is_superadmin
             FROM members m
