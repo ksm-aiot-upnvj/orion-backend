@@ -34,6 +34,8 @@ class AuthService:
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE (u.student_id = :identifier OR u.email = :identifier) AND u.is_active = true
+              AND (m.status IS NULL OR m.status = 'Aktif' OR
+                   (m.status = 'Alumni' AND (u.is_superadmin OR UPPER(u.role) = 'SUPERADMIN')))
             """
         )
         result = await self.session.execute(stmt, {"identifier": identifier})
@@ -51,6 +53,8 @@ class AuthService:
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE u.id = :user_id AND u.is_active = true
+              AND (m.status IS NULL OR m.status = 'Aktif' OR
+                   (m.status = 'Alumni' AND (u.is_superadmin OR UPPER(u.role) = 'SUPERADMIN')))
             """
         )
         result = await self.session.execute(stmt, {"user_id": user_id})

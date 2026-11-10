@@ -91,6 +91,13 @@ async def test_member_erp_access_lifecycle():
         )
         assert alumni_login.status_code == 401
 
+        forbidden_grant = await ac.post(
+            "/orion/api/v1/members/2410511888/access",
+            json={"password": "ReactivatedPassword#2026!", "role": "PENGURUS"},
+            headers=headers,
+        )
+        assert forbidden_grant.status_code == 409
+
         # 10. Clean up test member
         del_res = await ac.delete("/orion/api/v1/members/2410511888", headers=headers)
         assert del_res.status_code == 200

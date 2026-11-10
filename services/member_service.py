@@ -116,7 +116,7 @@ class MemberService:
         await self.session.commit()
         return dict(result.mappings().first())
 
-    async def get_member_by_identifier(self, identifier: str) -> dict | None:
+    async def get_member_by_identifier(self, identifier: str, *, for_update: bool = False) -> dict | None:
         """Find member by UUID, member_id or student_id with ERP access info."""
         base_query = """
             SELECT m.id, m.member_id, m.student_id, m.full_name, m.program_of_study, m.semester, m.email, m.contact_info, m.domicile_city,
@@ -126,17 +126,19 @@ class MemberService:
                    m.avatar, m.status, m.join_date, m.created_at,
                    (u.id IS NOT NULL AND u.is_active = true) AS has_erp_access,
                    u.role AS user_role,
-                   u.is_active AS user_is_active
+                   u.is_active AS user_is_active,
+                   u.is_superadmin AS user_is_superadmin
             FROM members m
             LEFT JOIN users u ON (m.id = u.member_id OR m.student_id = u.student_id)
         """
+        lock = " FOR UPDATE OF m" if for_update else ""
         try:
             val_uuid = uuid.UUID(identifier)
-            stmt = text(f"{base_query} WHERE m.id = :id")
+            stmt = text(f"{base_query} WHERE m.id = :id{lock}")
             result = await self.session.execute(stmt, {"id": val_uuid})
             return result.mappings().first()
         except ValueError:
-            stmt = text(f"{base_query} WHERE m.member_id = :identifier OR m.student_id = :identifier")
+            stmt = text(f"{base_query} WHERE m.member_id = :identifier OR m.student_id = :identifier{lock}")
             result = await self.session.execute(stmt, {"identifier": identifier})
             return result.mappings().first()
 
@@ -189,9 +191,6 @@ class MemberService:
         create_erp = member_data.pop("create_erp_account", None)
         erp_pwd = member_data.pop("erp_password", None)
         erp_role = member_data.pop("erp_role", None)
-        if create_erp and erp_pwd:
-            # Fail before writing the member when the actor may not grant this access
-            await self._authorize_erp_change(member_data.get("student_id"), actor, erp_role or ERP_ROLE_PENGURUS)
 
         # Sanitize text fields to prevent injection
         member_data = sanitize_dict_fields(member_data)
@@ -214,6 +213,9 @@ class MemberService:
         div = get_enum_val(member_data.get("division"), None)
         role = get_enum_val(member_data.get("role"), MemberRole.ANGGOTA.value)
         stat = get_enum_val(member_data.get("status"), MemberStatus.AKTIF.value)
+        requested_erp_role = (erp_role or ERP_ROLE_PENGURUS) if create_erp and erp_pwd else None
+        if requested_erp_role:
+            self._validate_erp_member_status(stat, requested_erp_role)
 
         tracks = member_data.get("interest_track")
         if isinstance(tracks, str):
@@ -312,22 +314,25 @@ class MemberService:
         }
         try:
             result = await self.session.execute(stmt, params)
+            created_row = dict(result.mappings().one())
+            if stat != MemberStatus.AKTIF.value:
+                await self._sync_membership_status(created_row, stat, actor)
+            if requested_erp_role:
+                await self._authorize_erp_change(created_row["student_id"], actor, requested_erp_role)
+                account = await self._write_erp_account(created_row, erp_pwd, requested_erp_role)
+            else:
+                account = None
+            created_row = dict(await self.get_member_by_identifier(str(created_row["id"])))
             await self.session.commit()
         except Exception:
             await self.session.rollback()
             storage.unpromote_upload(promoted_avatar)
             raise
-        created_row = dict(result.mappings().first())
         if previous_avatar and previous_avatar != avatar_value:
             await release_upload(self.session, previous_avatar)
 
-        # Handle ERP account creation if requested (same authorization rules as the /access endpoint)
-        if create_erp and erp_pwd:
-            erp_role = erp_role or ERP_ROLE_PENGURUS
-            await self.grant_erp_access(created_row["student_id"], password=erp_pwd, erp_role=erp_role, actor=actor)
-            created_row["has_erp_access"] = True
-            created_row["user_role"] = erp_role
-            created_row["user_is_active"] = True
+        if account and actor:
+            await self._log_erp_grant(account, actor)
 
         if actor and created_row:
             await log_audit_event(
@@ -345,7 +350,7 @@ class MemberService:
 
     async def update_member(self, identifier: str, update_data: dict, actor: dict | None = None) -> dict | None:
         """Update an existing member by UUID, member_id, or student_id."""
-        existing = await self.get_member_by_identifier(identifier)
+        existing = await self.get_member_by_identifier(identifier, for_update=True)
         if not existing:
             return None
 
@@ -362,8 +367,10 @@ class MemberService:
                     status_code=403,
                     detail="Akses Ditolak: Anda tidak dapat mengubah jabatan, divisi, atau status keanggotaan Anda sendiri.",
                 )
-        if create_erp and erp_pwd:
-            await self._authorize_erp_change(existing["student_id"], actor, erp_role or ERP_ROLE_PENGURUS)
+        requested_erp_role = (erp_role or ERP_ROLE_PENGURUS) if create_erp and erp_pwd else None
+        if requested_erp_role:
+            await self._authorize_erp_change(existing["student_id"], actor, requested_erp_role)
+            self._validate_erp_member_status(update_data.get("status") or existing["status"], requested_erp_role)
 
         update_data = sanitize_dict_fields(update_data)
         fields = []
@@ -405,55 +412,29 @@ class MemberService:
                     fields.append(f"{k} = :{k}")
                     params[k] = v
 
-        if fields:
-            stmt = text(f"UPDATE members SET {', '.join(fields)} WHERE id = :id RETURNING *")  # nosec B608 - column names come from MemberUpdate fields; values are bound
-            try:
+        try:
+            member = existing
+            if fields:
+                stmt = text(f"UPDATE members SET {', '.join(fields)} WHERE id = :id RETURNING *")  # nosec B608 - column names come from MemberUpdate fields; values are bound
                 result = await self.session.execute(stmt, params)
-                await self.session.commit()
-            except Exception:
-                await self.session.rollback()
-                storage.unpromote_upload(promoted_avatar)
-                raise
-            updated_row = dict(result.mappings().first())
-        else:
-            updated_row = dict(existing)
+                member = result.mappings().one()
+            if params.get("status") in (MemberStatus.ALUMNI.value, MemberStatus.TIDAK_AKTIF.value):
+                await self._sync_membership_status(existing, params["status"], actor)
+            account = await self._write_erp_account(member, erp_pwd, requested_erp_role) if requested_erp_role else None
+            updated_row = dict(await self.get_member_by_identifier(str(existing["id"])))
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            storage.unpromote_upload(promoted_avatar)
+            raise
 
         # Replaced avatar: remove the old file unless another record still uses it
         old_avatar = existing.get("avatar")
         if old_avatar and old_avatar != updated_row.get("avatar"):
             await release_upload(self.session, old_avatar)
 
-        # Policy: If status changed to Alumni or Tidak Aktif, automatically revoke/deactivate ERP login access
-        new_status = params.get("status")
-        if new_status in (MemberStatus.ALUMNI.value, MemberStatus.TIDAK_AKTIF.value):
-            await self.session.execute(
-                text("UPDATE users SET is_active = false WHERE member_id = :m_id OR student_id = :student_id"),
-                {"m_id": existing["id"], "student_id": existing["student_id"]},
-            )
-            await self.session.commit()
-            updated_row["has_erp_access"] = False
-            updated_row["user_is_active"] = False
-
-        if new_status == MemberStatus.ALUMNI.value:
-            await self.session.execute(
-                text(
-                    """
-                    INSERT INTO alumni_profiles (id, member_id, visibility, consent_given, created_at, updated_at)
-                    VALUES (:id, :member_id, false, false, NOW(), NOW())
-                    ON CONFLICT (member_id) DO NOTHING
-                    """
-                ),
-                {"id": generate_uuid7(), "member_id": existing["id"]},
-            )
-            await self.session.commit()
-
-        # If explicit ERP credentials provided in update
-        if create_erp and erp_pwd:
-            role_val = erp_role or ERP_ROLE_PENGURUS
-            await self.grant_erp_access(identifier, password=erp_pwd, erp_role=role_val, actor=actor)
-            updated_row["has_erp_access"] = True
-            updated_row["user_role"] = role_val
-            updated_row["user_is_active"] = True
+        if account and actor:
+            await self._log_erp_grant(account, actor)
 
         if actor and updated_row:
             await log_audit_event(
@@ -468,6 +449,47 @@ class MemberService:
             )
 
         return updated_row
+
+    async def _sync_membership_status(self, member, new_status: str, actor: dict | None) -> None:
+        is_alumni = new_status == MemberStatus.ALUMNI.value
+        if not is_alumni:
+            current = await self.get_member_by_identifier(str(member["id"]))
+            self._protect_superadmin_account(current, actor)
+        await self.session.execute(
+            text("""
+                UPDATE users SET is_active = false
+                WHERE (member_id = :member_id OR student_id = :student_id)
+                  AND (NOT :is_alumni OR NOT (is_superadmin OR UPPER(role) = 'SUPERADMIN'))
+            """),
+            {"member_id": member["id"], "student_id": member["student_id"], "is_alumni": is_alumni},
+        )
+        if is_alumni:
+            await self.session.execute(
+                text("""
+                    INSERT INTO alumni_profiles (id, member_id, visibility, consent_given, created_at, updated_at)
+                    VALUES (:id, :member_id, false, false, NOW(), NOW())
+                    ON CONFLICT (member_id) DO NOTHING
+                """),
+                {"id": generate_uuid7(), "member_id": member["id"]},
+            )
+
+    @staticmethod
+    def _protect_superadmin_account(member, actor: dict | None) -> None:
+        if actor and not is_superadmin_user(actor) and (
+            member.get("user_is_superadmin") or (member.get("user_role") or "").upper() == ERP_ROLE_SUPERADMIN
+        ):
+            raise HTTPException(status_code=403, detail="Akun Superadmin hanya dapat diubah oleh Superadmin.")
+
+    @staticmethod
+    def _validate_erp_member_status(member_status: str, erp_role: str) -> None:
+        if member_status == MemberStatus.AKTIF.value:
+            return
+        if member_status == MemberStatus.ALUMNI.value and erp_role == ERP_ROLE_SUPERADMIN:
+            return
+        raise HTTPException(
+            status_code=409,
+            detail="Akses ERP memerlukan status Aktif. Alumni hanya dapat memiliki akses SUPERADMIN.",
+        )
 
     async def _authorize_erp_change(self, student_id: str | None, actor: dict | None, erp_role: str | None = None) -> None:
         """
@@ -500,11 +522,23 @@ class MemberService:
         actor: dict | None = None,
     ) -> dict:
         """Create or activate user account for member to access ERP dashboard."""
-        member = await self.get_member_by_identifier(identifier)
+        member = await self.get_member_by_identifier(identifier, for_update=True)
         if not member:
             raise HTTPException(status_code=404, detail="Data anggota tidak ditemukan")
         await self._authorize_erp_change(member["student_id"], actor, erp_role)
+        self._validate_erp_member_status(member["status"], erp_role)
+        user_row = await self._write_erp_account(member, password, erp_role)
+        await self.session.commit()
+        if actor:
+            await self._log_erp_grant(user_row, actor)
 
+        return {
+            "status": "success",
+            "message": f"Akses ERP untuk {member['full_name']} ({member['student_id']}) berhasil diaktifkan.",
+            "user": dict(user_row),
+        }
+
+    async def _write_erp_account(self, member, password: str, erp_role: str):
         hashed_pwd = hash_password(password)
         is_superadmin = erp_role == ERP_ROLE_SUPERADMIN
 
@@ -538,26 +572,19 @@ class MemberService:
                 "is_superadmin": is_superadmin,
             },
         )
-        await self.session.commit()
-        user_row = res.mappings().first()
+        return res.mappings().one()
 
-        if actor:
-            await log_audit_event(
-                session=self.session,
-                action="ERP_ACCESS_GRANTED",
-                resource_type="USER",
-                resource_id=str(user_row["id"]),
-                actor_id=actor.get("id"),
-                actor_name=actor.get("full_name"),
-                actor_role=actor.get("role"),
-                details={"student_id": member["student_id"], "erp_role": erp_role},
-            )
-
-        return {
-            "status": "success",
-            "message": f"Akses ERP untuk {member['full_name']} ({member['student_id']}) berhasil diaktifkan.",
-            "user": dict(user_row),
-        }
+    async def _log_erp_grant(self, account, actor: dict) -> None:
+        await log_audit_event(
+            session=self.session,
+            action="ERP_ACCESS_GRANTED",
+            resource_type="USER",
+            resource_id=str(account["id"]),
+            actor_id=actor.get("id"),
+            actor_name=actor.get("full_name"),
+            actor_role=actor.get("role"),
+            details={"student_id": account["student_id"], "erp_role": account["role"]},
+        )
 
     async def revoke_erp_access(self, identifier: str, actor: dict | None = None) -> dict:
         """Deactivate ERP user account for a member (preserves audit log integrity)."""
@@ -646,9 +673,10 @@ class MemberService:
         """
         Anonymize member PII while preserving ID and historical links for Kas/Inventaris/Surat (UU PDP Right to Erasure).
         """
-        existing = await self.get_member_by_identifier(identifier)
+        existing = await self.get_member_by_identifier(identifier, for_update=True)
         if not existing:
             return None
+        self._protect_superadmin_account(existing, actor)
 
         # 1. Physically delete avatar file from storage
         if existing.get("avatar"):
@@ -704,9 +732,10 @@ class MemberService:
 
     async def delete_member(self, identifier: str, actor: dict | None = None) -> bool:
         """Hard delete member by identifier and unlink physical avatar (Right to Erasure)."""
-        existing = await self.get_member_by_identifier(identifier)
+        existing = await self.get_member_by_identifier(identifier, for_update=True)
         if not existing:
             return False
+        self._protect_superadmin_account(existing, actor)
 
         if existing.get("avatar"):
             StorageService().delete_avatar(existing["avatar"])

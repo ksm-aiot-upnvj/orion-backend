@@ -105,6 +105,46 @@ async def test_member_manager_cannot_escalate_privileges():
 
 
 @pytest.mark.asyncio
+async def test_alumni_superadmin_keeps_access_until_explicit_revoke():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        admin = await _login(ac, settings.SUPERADMIN_NIM, settings.SUPERADMIN_PW)
+        password = "AlumniSuper#2026"
+        credentials = {"student_id": SUPER_TARGET_NIM, "password": password}
+        create = await ac.post(
+            f"{API}/members",
+            headers=admin,
+            json=_member(SUPER_TARGET_NIM, create_erp_account=True, erp_password=password, erp_role="SUPERADMIN"),
+        )
+        assert create.status_code == 201, create.text
+
+        incompatible_update = await ac.put(
+            f"{API}/members/{SUPER_TARGET_NIM}",
+            headers=admin,
+            json={"status": "Alumni", "create_erp_account": True, "erp_password": password, "erp_role": "PENGURUS"},
+        )
+        assert incompatible_update.status_code == 409
+        member = await ac.get(f"{API}/members/{SUPER_TARGET_NIM}", headers=admin)
+        assert member.json()["status"] == "Aktif"
+
+        update = await ac.put(f"{API}/members/{SUPER_TARGET_NIM}", headers=admin, json={"status": "Alumni"})
+        assert update.status_code == 200, update.text
+        assert update.json()["has_erp_access"] is True
+        profile = await ac.get(f"{API}/members/{SUPER_TARGET_NIM}/alumni-profile", headers=admin)
+        assert profile.status_code == 200
+        assert profile.json()["visibility"] is False
+
+        login = await ac.post(f"{API}/auth/login", json=credentials)
+        assert login.status_code == 200, login.text
+        assert login.json()["user"]["is_superadmin"] is True
+        alumni_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert (await ac.get(f"{API}/auth/session", headers=alumni_headers)).status_code == 200
+
+        revoke = await ac.delete(f"{API}/members/{SUPER_TARGET_NIM}/access", headers=admin)
+        assert revoke.status_code == 200
+        assert (await ac.get(f"{API}/auth/session", headers=alumni_headers)).status_code == 401
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["MEMBER", "Anggota", "ANGGOTA", "", None, "Guest", "user"])
 async def test_require_pengurus_denies_non_pengurus_roles(role):
     from fastapi import HTTPException
