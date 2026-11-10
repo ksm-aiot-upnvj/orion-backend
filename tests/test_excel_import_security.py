@@ -88,6 +88,32 @@ async def test_import_cannot_change_importers_own_role():
 
 
 @pytest.mark.asyncio
+async def test_import_applies_alumni_access_rules():
+    async with AsyncSessionLocal() as session:
+        rows = [_row(KETUA_NIM, "Ketua"), _row(STAFF_NIM, "Staff")]
+        await ExcelMemberImporter.import_to_database(session, rows)
+        await session.execute(
+            text("UPDATE users SET is_superadmin = true, role = 'SUPERADMIN' WHERE student_id = :nim"),
+            {"nim": KETUA_NIM},
+        )
+        await session.commit()
+
+        await ExcelMemberImporter.import_to_database(session, [{**row, "status": "Alumni"} for row in rows])
+        result = await session.execute(
+            text("""
+                SELECT u.student_id, u.is_active, ap.visibility
+                FROM users u JOIN alumni_profiles ap ON ap.member_id = u.member_id
+                WHERE u.student_id = ANY(:nims)
+            """),
+            {"nims": [KETUA_NIM, STAFF_NIM]},
+        )
+        assert {row.student_id: (row.is_active, row.visibility) for row in result} == {
+            KETUA_NIM: (True, False),
+            STAFF_NIM: (False, False),
+        }
+
+
+@pytest.mark.asyncio
 async def test_import_escapes_html_and_drops_script_links():
     row = _row(STAFF_NIM, "Staff")
     row["full_name"] = '<img src=x onerror="alert(1)">'

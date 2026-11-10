@@ -318,7 +318,7 @@ class MemberService:
             result = await self.session.execute(stmt, params)
             created_row = dict(result.mappings().one())
             if stat != MemberStatus.AKTIF.value:
-                await self._sync_membership_status(created_row, stat, actor)
+                await self.sync_membership_access(created_row["id"], created_row["student_id"], stat, actor)
             if requested_erp_role:
                 await self._authorize_erp_change(created_row["student_id"], actor, requested_erp_role)
                 account = await self._write_erp_account(created_row, erp_pwd, requested_erp_role)
@@ -421,7 +421,7 @@ class MemberService:
                 result = await self.session.execute(stmt, params)
                 member = result.mappings().one()
             if params.get("status") in (MemberStatus.ALUMNI.value, MemberStatus.TIDAK_AKTIF.value):
-                await self._sync_membership_status(existing, params["status"], actor)
+                await self.sync_membership_access(existing["id"], existing["student_id"], params["status"], actor)
             account = await self._write_erp_account(member, erp_pwd, requested_erp_role) if requested_erp_role else None
             updated_row = dict(await self.get_member_by_identifier(str(existing["id"])))
             await self.session.commit()
@@ -452,10 +452,15 @@ class MemberService:
 
         return updated_row
 
-    async def _sync_membership_status(self, member, new_status: str, actor: dict | None) -> None:
+    async def sync_membership_access(
+        self, member_id: uuid.UUID, student_id: str, new_status: str, actor: dict | None
+    ) -> None:
+        """Apply membership status effects inside the caller's transaction."""
+        if new_status == MemberStatus.AKTIF.value:
+            return
         is_alumni = new_status == MemberStatus.ALUMNI.value
         if not is_alumni:
-            current = await self.get_member_by_identifier(str(member["id"]))
+            current = await self.get_member_by_identifier(str(member_id))
             self._protect_superadmin_account(current, actor)
         await self.session.execute(
             text("""
@@ -463,7 +468,7 @@ class MemberService:
                 WHERE (member_id = :member_id OR student_id = :student_id)
                   AND (NOT :is_alumni OR NOT (is_superadmin OR UPPER(role) = 'SUPERADMIN'))
             """),
-            {"member_id": member["id"], "student_id": member["student_id"], "is_alumni": is_alumni},
+            {"member_id": member_id, "student_id": student_id, "is_alumni": is_alumni},
         )
         if is_alumni:
             await self.session.execute(
@@ -472,7 +477,7 @@ class MemberService:
                     VALUES (:id, :member_id, false, false, NOW(), NOW())
                     ON CONFLICT (member_id) DO NOTHING
                 """),
-                {"id": generate_uuid7(), "member_id": member["id"]},
+                {"id": generate_uuid7(), "member_id": member_id},
             )
 
     @staticmethod

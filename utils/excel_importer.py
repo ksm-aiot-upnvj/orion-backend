@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.config import settings
 from config.db import AsyncSessionLocal
 from models.enums import Division, MemberRole, MemberStatus, ResearchField, StudyProgram
+from services.member_service import MemberService
 from utils.sanitizer import is_safe_link, sanitize_dict_fields
 from utils.security import hash_password
 from utils.uuid_utils import generate_uuid7
@@ -186,6 +187,7 @@ class ExcelMemberImporter:
         actor_student_id = actor.get("student_id") if actor else None
         imported_count = 0
         user_synced_count = 0
+        member_service = MemberService(db)
 
         # Pre-fetch existing members to maintain consistent member_id or assign new ones
         existing_result = await db.execute(text("SELECT id, student_id, member_id, role, division, status FROM members"))
@@ -318,7 +320,8 @@ class ExcelMemberImporter:
                     member_id = EXCLUDED.member_id,
                     full_name = EXCLUDED.full_name,
                     email = EXCLUDED.email,
-                    role = EXCLUDED.role,
+                    role = CASE WHEN users.is_superadmin OR UPPER(users.role) = 'SUPERADMIN'
+                                THEN users.role ELSE EXCLUDED.role END,
                     division = EXCLUDED.division
                 """
             )
@@ -334,6 +337,7 @@ class ExcelMemberImporter:
                 "avatar": None,
                 "is_superadmin": False,
             })
+            await member_service.sync_membership_access(actual_member_id, student_id, m["status"], actor)
             user_synced_count += 1
 
         await db.commit()
