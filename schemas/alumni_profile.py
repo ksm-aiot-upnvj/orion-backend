@@ -15,6 +15,8 @@ class AlumniProfileBase(BaseModel):
 
 
 class AlumniProfileUpdate(AlumniProfileBase):
+    avatar: str | None = Field(default=None, max_length=255)
+
     @model_validator(mode="after")
     def require_publication_consent(self) -> Self:
         if self.visibility and not self.consent_given:
@@ -27,3 +29,4 @@ class AlumniProfileResponse(AlumniProfileBase):
 
     id: uuid.UUID
     member_id: uuid.UUID
+    avatar: str | None = None

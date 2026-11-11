@@ -77,7 +77,11 @@ class MemberService:
             {"member_id": member["id"]},
         )
         profile = result.mappings().first()
-        return dict(profile) if profile else None
+        if not profile:
+            return None
+        profile_data = dict(profile)
+        profile_data["avatar"] = member.get("avatar")
+        return profile_data
 
     async def upsert_alumni_profile(self, identifier: str, profile_data: dict, actor: dict | None = None) -> dict:
         member = await self.get_member_by_identifier(identifier, for_update=True)
@@ -88,37 +92,62 @@ class MemberService:
                 status_code=409, detail="Profil alumni hanya dapat diatur untuk anggota berstatus Alumni"
             )
 
-        params = {
-            "id": generate_uuid7(),
-            "member_id": member["id"],
-            **profile_data,
-        }
-        result = await self.session.execute(
-            text(
-                """
-                INSERT INTO alumni_profiles (
-                    id, member_id, graduation_year, current_company, "current_role",
-                    linkedin_url, testimonial, visibility, consent_given, created_at, updated_at
-                ) VALUES (
-                    :id, :member_id, :graduation_year, :current_company, :current_role,
-                    :linkedin_url, :testimonial, :visibility, :consent_given, NOW(), NOW()
+        avatar_submitted = "avatar" in profile_data
+        avatar_value = member.get("avatar")
+        storage = StorageService()
+        promoted_avatar = None
+        previous_avatar = member.get("avatar")
+        if avatar_submitted:
+            avatar_value, promoted_avatar = storage.commit_upload_field(
+                profile_data.pop("avatar"), "avatars", keep_values={previous_avatar}, allow_external=True
+            )
+
+        try:
+            params = {
+                "id": generate_uuid7(),
+                "member_id": member["id"],
+                **profile_data,
+            }
+            if avatar_submitted:
+                await self.session.execute(
+                    text("UPDATE members SET avatar = :avatar WHERE id = :member_id"),
+                    {"avatar": avatar_value, "member_id": member["id"]},
                 )
-                ON CONFLICT (member_id) DO UPDATE SET
-                    graduation_year = EXCLUDED.graduation_year,
-                    current_company = EXCLUDED.current_company,
-                    "current_role" = EXCLUDED."current_role",
-                    linkedin_url = EXCLUDED.linkedin_url,
-                    testimonial = EXCLUDED.testimonial,
-                    visibility = EXCLUDED.visibility,
-                    consent_given = EXCLUDED.consent_given,
-                    updated_at = NOW()
-                RETURNING *
-                """
-            ),
-            params,
-        )
-        await self.session.commit()
-        return dict(result.mappings().first())
+            result = await self.session.execute(
+                text(
+                    """
+                    INSERT INTO alumni_profiles (
+                        id, member_id, graduation_year, current_company, "current_role",
+                        linkedin_url, testimonial, visibility, consent_given, created_at, updated_at
+                    ) VALUES (
+                        :id, :member_id, :graduation_year, :current_company, :current_role,
+                        :linkedin_url, :testimonial, :visibility, :consent_given, NOW(), NOW()
+                    )
+                    ON CONFLICT (member_id) DO UPDATE SET
+                        graduation_year = EXCLUDED.graduation_year,
+                        current_company = EXCLUDED.current_company,
+                        "current_role" = EXCLUDED."current_role",
+                        linkedin_url = EXCLUDED.linkedin_url,
+                        testimonial = EXCLUDED.testimonial,
+                        visibility = EXCLUDED.visibility,
+                        consent_given = EXCLUDED.consent_given,
+                        updated_at = NOW()
+                    RETURNING *
+                    """
+                ),
+                params,
+            )
+            profile = dict(result.mappings().first())
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            storage.unpromote_upload(promoted_avatar)
+            raise
+
+        if avatar_submitted and previous_avatar != avatar_value:
+            await release_upload(self.session, previous_avatar)
+        profile["avatar"] = avatar_value
+        return profile
 
     async def get_member_by_identifier(self, identifier: str, *, for_update: bool = False) -> dict | None:
         """Find member by UUID, member_id or student_id with ERP access info."""

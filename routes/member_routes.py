@@ -61,7 +61,9 @@ async def update_alumni_profile(
     current_user: dict = Depends(can_manage_members),
 ):
     service = MemberService(db)
-    profile_data = payload.model_dump()
+    profile_data = payload.model_dump(exclude={"avatar"})
+    if "avatar" in payload.model_fields_set:
+        profile_data["avatar"] = payload.avatar
     if profile_data.get("linkedin_url") is not None:
         profile_data["linkedin_url"] = str(profile_data["linkedin_url"])
     profile = await service.upsert_alumni_profile(identifier, profile_data, actor=current_user)
