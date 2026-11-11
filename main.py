@@ -60,7 +60,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    root_path=settings.API_V1_STR,
     redoc_url=None,
     servers=[
         {

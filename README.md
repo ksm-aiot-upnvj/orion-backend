@@ -127,7 +127,7 @@ uv run alembic revision --autogenerate -m "deskripsi singkat"
 **Pengembangan:**
 
 ```bash
-uv run uvicorn main:app --reload --port 8000
+uv run fastapi dev main.py --host 127.0.0.1 --port 8000 --root-path /orion/api/v1
 ```
 
 API: `http://localhost:8000/orion/api/v1` · Swagger UI: `http://localhost:8000/orion/api/v1/docs` · health: `GET /orion/api/v1/health`.
@@ -135,7 +135,7 @@ API: `http://localhost:8000/orion/api/v1` · Swagger UI: `http://localhost:8000/
 **Production (tanpa Docker):**
 
 ```bash
-uv run uvicorn main:app --host 0.0.0.0 --port 8000
+uv run fastapi run main.py --host 0.0.0.0 --port 8000 --root-path /orion/api/v1
 ```
 
 Gunakan satu proses worker: rate limiter dan tugas pembersih staging berjalan di memori proses.
@@ -147,7 +147,7 @@ docker build -t orion-backend .
 docker run -d --name orion-api --env-file .env -p 8000:8000 -v orion-uploads:/app/uploads orion-backend
 ```
 
-`entrypoint.sh` menunggu database, membuat skema (DB baru) atau menjalankan `alembic upgrade head` (DB lama), menurunkan hak ke user `orion`, lalu menjalankan uvicorn. Pembersihan berkas yatim satu kali: `uv run python scripts/cleanup_orphan_uploads.py` (daftar saja) lalu `--apply`.
+`entrypoint.sh` menunggu database, membuat skema (DB baru) atau menjalankan `alembic upgrade head` (DB lama), menurunkan hak ke user `orion`, lalu menjalankan FastAPI CLI. Jika backend dijalankan di Docker dengan PostgreSQL di host, atur `PGHOST=host.docker.internal`. Pembersihan berkas yatim satu kali: `uv run python scripts/cleanup_orphan_uploads.py` (daftar saja) lalu `--apply`.
 
 ## Menjalankan test dan linter
 
