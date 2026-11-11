@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -26,5 +26,6 @@ class User(Base):
     avatar = Column(String(255), nullable=True)
     is_superadmin = Column(Boolean, default=False, server_default=text("false"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    token_version = Column(Integer, default=0, server_default=text("0"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 

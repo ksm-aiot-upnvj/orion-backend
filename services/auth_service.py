@@ -30,7 +30,8 @@ class AuthService:
                    CASE WHEN u.is_superadmin = true THEN 'SUPERADMIN' ELSE COALESCE(m.role::text, u.role) END AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
-                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
+                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active,
+                   u.token_version, u.created_at
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE (u.student_id = :identifier OR u.email = :identifier) AND u.is_active = true
@@ -49,7 +50,8 @@ class AuthService:
                    CASE WHEN u.is_superadmin = true THEN 'SUPERADMIN' ELSE COALESCE(m.role::text, u.role) END AS role,
                    COALESCE(m.division::text, u.division::text) AS division,
                    COALESCE(u.member_id, m.id) AS member_id,
-                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active, u.created_at
+                   COALESCE(u.avatar, m.avatar) AS avatar, u.is_superadmin, u.is_active,
+                   u.token_version, u.created_at
             FROM users u
             LEFT JOIN members m ON u.student_id = m.student_id
             WHERE u.id = :user_id AND u.is_active = true
@@ -72,18 +74,20 @@ class AuthService:
 
         if not user or not verify_password(req.password, user["hashed_password"]):
             # Record failed login attempt in audit log
+            identifier_type = "email" if "@" in identifier else "student_id" if identifier.isdecimal() else "other"
+            safe_resource = f"Akun: {user['student_id']}" if user else f"Percobaan login ({identifier_type})"
             await log_audit_event(
                 session=self.session,
                 action="AUTH_LOGIN_FAILED",
                 resource_type="USER",
-                resource_id=f"Akun: {identifier}",
+                resource_id=safe_resource,
                 actor_id=user["id"] if user else None,
-                actor_name=user["full_name"] if user else identifier,
+                actor_name=user["full_name"] if user else "Akun tidak dikenal",
                 actor_role=user["role"] if user else "UNKNOWN",
                 ip_address=ip_address,
                 user_agent=user_agent,
                 status="FAILED",
-                details={"identifier": identifier, "is_superadmin": bool(user.get("is_superadmin", False)) if user else False},
+                details={"identifier_type": identifier_type, "is_superadmin": bool(user.get("is_superadmin", False)) if user else False},
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -101,6 +105,7 @@ class AuthService:
                 "division": user.get("division"),
                 "is_superadmin": is_sa,
                 "name": user["full_name"],
+                "token_version": user["token_version"],
             }
         )
 
@@ -108,6 +113,7 @@ class AuthService:
             data={
                 "sub": str(user["id"]),
                 "student_id": user["student_id"],
+                "token_version": user["token_version"],
             }
         )
 
@@ -172,6 +178,12 @@ class AuthService:
                 detail="Akun pengguna tidak aktif atau tidak ditemukan.",
             )
 
+        if payload.get("token_version", 0) != user.get("token_version", 0):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesi refresh telah dicabut. Silakan login kembali.",
+            )
+
         is_sa = bool(user.get("is_superadmin", False))
         effective_role = "SUPERADMIN" if is_sa else (user.get("role") or "USER")
 
@@ -183,6 +195,7 @@ class AuthService:
                 "division": user.get("division"),
                 "is_superadmin": is_sa,
                 "name": user["full_name"],
+                "token_version": user["token_version"],
             }
         )
 
@@ -191,6 +204,7 @@ class AuthService:
             data={
                 "sub": str(user["id"]),
                 "student_id": user["student_id"],
+                "token_version": user["token_version"],
             }
         )
 
@@ -200,6 +214,14 @@ class AuthService:
             "token_type": "bearer",  # nosec B105 - OAuth token type, not a password
             "user": UserOut.model_validate(user),
         }
+
+    async def revoke_user_sessions(self, user_id: uuid.UUID) -> None:
+        """Revoke all access and refresh tokens issued before this operation."""
+        await self.session.execute(
+            text("UPDATE users SET token_version = token_version + 1 WHERE id = :user_id"),
+            {"user_id": user_id},
+        )
+        await self.session.commit()
 
     async def update_profile(self, user_id: uuid.UUID, data: ProfileUpdate) -> dict:
         """Update current logged-in user profile with sanitization and audit log."""
@@ -302,7 +324,8 @@ class AuthService:
         stmt = text(
             """
             UPDATE users
-            SET hashed_password = :hashed_password
+            SET hashed_password = :hashed_password,
+                token_version = token_version + 1
             WHERE id = :user_id
             """
         )

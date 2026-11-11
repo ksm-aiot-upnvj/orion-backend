@@ -94,7 +94,7 @@ async def change_password(
     """Change logged-in user password."""
     service = AuthService(db)
     await service.change_password(current_user["id"], payload)
-    return {"status": "success", "message": "Password berhasil diperbarui secara aman."}
+    return {"status": "success", "message": "Password berhasil diperbarui. Silakan login kembali."}
 
 
 @router.post("/logout")
@@ -105,6 +105,8 @@ async def logout(
 ):
     """Logout current session and record audit trail."""
     client_ip = get_client_ip(request)
+    service = AuthService(db)
+    await service.revoke_user_sessions(current_user["id"])
     await log_audit_event(
         session=db,
         action="AUTH_LOGOUT",

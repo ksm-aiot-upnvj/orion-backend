@@ -497,7 +497,8 @@ class MemberService:
             self._protect_superadmin_account(current, actor)
         await self.session.execute(
             text("""
-                UPDATE users SET is_active = false
+                UPDATE users
+                SET is_active = false, token_version = token_version + 1
                 WHERE (member_id = :member_id OR student_id = :student_id)
                   AND (NOT :is_alumni OR NOT (is_superadmin OR UPPER(role) = 'SUPERADMIN'))
             """),
@@ -594,7 +595,8 @@ class MemberService:
                 role = EXCLUDED.role,
                 division = EXCLUDED.division,
                 is_superadmin = EXCLUDED.is_superadmin,
-                is_active = true
+                is_active = true,
+                token_version = users.token_version + 1
             RETURNING id, student_id, full_name, email, role, is_active
             """
         )
@@ -636,7 +638,8 @@ class MemberService:
         stmt = text(
             """
             UPDATE users
-            SET is_active = false
+            SET is_active = false,
+                token_version = token_version + 1
             WHERE member_id = :m_id OR student_id = :student_id
             RETURNING id, student_id, full_name, is_active
             """
@@ -677,7 +680,9 @@ class MemberService:
         stmt = text(
             """
             UPDATE users
-            SET hashed_password = :hashed_pwd, is_active = true
+            SET hashed_password = :hashed_pwd,
+                is_active = true,
+                token_version = token_version + 1
             WHERE member_id = :m_id OR student_id = :student_id
             RETURNING id, student_id, full_name
             """
@@ -750,7 +755,10 @@ class MemberService:
         result = await self.session.execute(stmt, params)
         # Deactivate user login as well
         await self.session.execute(
-            text("UPDATE users SET is_active = false WHERE member_id = :m_id OR student_id = :student_id"),
+            text(
+                "UPDATE users SET is_active = false, token_version = token_version + 1 "
+                "WHERE member_id = :m_id OR student_id = :student_id"
+            ),
             {"m_id": existing["id"], "student_id": existing["student_id"]},
         )
         await self.session.commit()

@@ -87,6 +87,12 @@ async def get_current_user(
             detail="Pengguna tidak ditemukan atau akun telah dinonaktifkan.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if payload.get("token_version", 0) != user.get("token_version", 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesi autentikasi telah dicabut. Silakan login kembali.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
