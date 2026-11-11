@@ -111,62 +111,128 @@ class AuditLogService:
         offset: int = 0,
     ) -> list[dict]:
         """Query audit logs with optional filtering and pagination."""
-        query_str = """
-            SELECT audit_logs.id, audit_logs.timestamp, audit_logs.actor_id,
-                   audit_logs.actor_name, audit_logs.actor_role, audit_logs.action,
-                   audit_logs.resource_type, audit_logs.resource_id, audit_logs.ip_address,
-                   audit_logs.user_agent, audit_logs.details, audit_logs.status,
-                   users.is_superadmin AS is_superadmin,
-                   CASE
-                     WHEN audit_logs.resource_type = 'USER' THEN
-                       CASE WHEN target_user.id IS NOT NULL
-                         THEN CONCAT('Akun: ', target_user.student_id, ' (', target_user.full_name, ')')
-                         ELSE NULL END
-                     WHEN audit_logs.resource_type = 'MEMBER' THEN
-                       CASE WHEN target_member.id IS NOT NULL
-                         THEN CONCAT('Anggota: ', target_member.member_id, ' — ', target_member.full_name, ' (', target_member.student_id, ')')
-                         ELSE NULL END
-                     WHEN audit_logs.resource_type = 'REGISTRATION' THEN
-                       CASE WHEN target_registration.id IS NOT NULL
-                         THEN CONCAT('Pendaftar: ', target_registration.full_name, ' (', target_registration.student_id, ')')
-                         ELSE NULL END
-                     ELSE NULL
-                   END AS resource_label
-            FROM audit_logs
-            LEFT JOIN users ON users.id = audit_logs.actor_id
-            LEFT JOIN users AS target_user
-              ON audit_logs.resource_type = 'USER'
-             AND target_user.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                                       THEN audit_logs.resource_id::uuid END
-            LEFT JOIN members AS target_member
-              ON audit_logs.resource_type = 'MEMBER'
-             AND target_member.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                                         THEN audit_logs.resource_id::uuid END
-            LEFT JOIN registrations AS target_registration
-              ON audit_logs.resource_type = 'REGISTRATION'
-             AND target_registration.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                                               THEN audit_logs.resource_id::uuid END
-            WHERE 1=1
+        rows, _ = await self.get_log_page(
+            resource_type=resource_type,
+            action=action,
+            actor_id=actor_id,
+            limit=limit,
+            offset=offset,
+        )
+        return rows
+
+    async def get_log_page(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        search: str = "",
+        action_prefix: str | None = None,
+        status: str | None = None,
+        resource_type: str | None = None,
+        action: str | None = None,
+        actor_id: str | None = None,
+    ) -> tuple[list[dict], int]:
+        """Filter all matching logs, count them, then fetch the requested page."""
+        rows_cte = """
+            WITH audit_log_rows AS (
+                SELECT audit_logs.id, audit_logs.timestamp, audit_logs.actor_id,
+                       audit_logs.actor_name, audit_logs.actor_role, audit_logs.action,
+                       audit_logs.resource_type, audit_logs.resource_id, audit_logs.ip_address,
+                       audit_logs.user_agent, audit_logs.details, audit_logs.status,
+                       users.is_superadmin AS is_superadmin,
+                       CASE
+                         WHEN audit_logs.resource_type = 'USER' THEN
+                           CASE WHEN target_user.id IS NOT NULL
+                             THEN CONCAT('Akun: ', target_user.student_id, ' (', target_user.full_name, ')')
+                             ELSE NULL END
+                         WHEN audit_logs.resource_type = 'MEMBER' THEN
+                           CASE WHEN target_member.id IS NOT NULL
+                             THEN CONCAT('Anggota: ', target_member.member_id, ' — ', target_member.full_name, ' (', target_member.student_id, ')')
+                             ELSE NULL END
+                         WHEN audit_logs.resource_type = 'REGISTRATION' THEN
+                           CASE WHEN target_registration.id IS NOT NULL
+                             THEN CONCAT('Pendaftar: ', target_registration.full_name, ' (', target_registration.student_id, ')')
+                             ELSE NULL END
+                         ELSE NULL
+                       END AS resource_label
+                FROM audit_logs
+                LEFT JOIN users ON users.id = audit_logs.actor_id
+                LEFT JOIN users AS target_user
+                  ON audit_logs.resource_type = 'USER'
+                 AND target_user.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                           THEN audit_logs.resource_id::uuid END
+                LEFT JOIN members AS target_member
+                  ON audit_logs.resource_type = 'MEMBER'
+                 AND target_member.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                             THEN audit_logs.resource_id::uuid END
+                LEFT JOIN registrations AS target_registration
+                  ON audit_logs.resource_type = 'REGISTRATION'
+                 AND target_registration.id = CASE WHEN audit_logs.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                                   THEN audit_logs.resource_id::uuid END
+            )
         """
-        params: dict[str, Any] = {"limit": min(limit, 200), "offset": max(offset, 0)}
+        conditions: list[str] = []
+        params: dict[str, Any] = {}
 
         if resource_type:
-            query_str += " AND resource_type = :resource_type"
+            conditions.append("UPPER(resource_type) = :resource_type")
             params["resource_type"] = resource_type.upper()
         if action:
-            query_str += " AND action = :action"
+            conditions.append("UPPER(action) = :action")
             params["action"] = action.upper()
         if actor_id:
             try:
                 params["actor_id"] = uuid.UUID(actor_id)
-                query_str += " AND actor_id = :actor_id"
+                conditions.append("actor_id = :actor_id")
             except ValueError:
                 pass
+        if action_prefix:
+            conditions.append("UPPER(action) LIKE :action_prefix")
+            params["action_prefix"] = f"{action_prefix.upper()}%"
+        if status:
+            if status.upper() == "SUCCESS":
+                conditions.append("UPPER(status) = 'SUCCESS'")
+            elif status.upper() == "FAILED":
+                conditions.append("UPPER(status) <> 'SUCCESS'")
+        if search and search.strip():
+            search_columns = (
+                "actor_name",
+                "actor_role",
+                "action",
+                "CASE UPPER(resource_type) "
+                "WHEN 'USER' THEN 'Pengguna' WHEN 'MEMBER' THEN 'Anggota' "
+                "WHEN 'REGISTRATION' THEN 'Pendaftaran' WHEN 'FILE' THEN 'Berkas' "
+                "ELSE resource_type END",
+                "COALESCE(resource_label, resource_id)",
+                "resource_id",
+                "ip_address",
+                "user_agent",
+                "CAST(id AS TEXT)",
+                "CASE WHEN is_superadmin IS TRUE THEN 'Ya' "
+                "WHEN is_superadmin IS FALSE THEN 'Tidak' "
+                "WHEN UPPER(actor_role) = 'SUPERADMIN' THEN 'Ya' "
+                "ELSE 'Tidak diketahui' END",
+            )
+            conditions.append("(" + " OR ".join(
+                f"STRPOS(LOWER(COALESCE({column}, '')), LOWER(:search)) > 0" for column in search_columns
+            ) + ")")
+            params["search"] = search.strip()
 
-        query_str += " ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        count_result = await self.session.execute(
+            text(f"{rows_cte} SELECT COUNT(*) AS total FROM audit_log_rows{where_clause}"), params
+        )
+        filtered_total = int(count_result.scalar_one())
 
-        result = await self.session.execute(text(query_str), params)
-        return result.mappings().all()
+        page_params = {**params, "limit": min(limit, 200), "offset": max(offset, 0)}
+        rows_result = await self.session.execute(
+            text(
+                f"{rows_cte} SELECT * FROM audit_log_rows{where_clause} "
+                "ORDER BY timestamp DESC, id DESC LIMIT :limit OFFSET :offset"
+            ),
+            page_params,
+        )
+        return rows_result.mappings().all(), filtered_total
 
     async def get_log_stats(self) -> dict[str, int]:
         """Return aggregate counts for all audit rows, independent of pagination."""

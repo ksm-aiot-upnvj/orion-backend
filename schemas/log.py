@@ -42,4 +42,5 @@ class AuditLogEntryOut(AuditLogEntry):
 class AuditLogPageOut(BaseModel):
     items: list[AuditLogEntryOut]
     total: int
+    filtered_total: int = 0
     stats: dict[str, int]

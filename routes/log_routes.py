@@ -12,6 +12,9 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit Logs"])
 async def get_audit_logs(
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    search: str = Query(default="", max_length=200),
+    action_prefix: str | None = Query(default=None, pattern="^(AUTH|MEMBER|SELECTION|UPLOAD)$"),
+    status: str | None = Query(default=None, pattern="^(SUCCESS|FAILED)$"),
     db: AsyncSession = Depends(get_db),
     current_user: None = Depends(require_pengurus),
 ):
@@ -20,9 +23,17 @@ async def get_audit_logs(
     Only accessible to users with 'pengurus' role.
     """
     service = AuditLogService(db)
-    rows, stats = await service.get_logs(limit=limit, offset=offset), await service.get_log_stats()
+    rows, filtered_total = await service.get_log_page(
+        limit=limit,
+        offset=offset,
+        search=search,
+        action_prefix=action_prefix,
+        status=status,
+    )
+    stats = await service.get_log_stats()
     return AuditLogPageOut(
         items=[AuditLogEntryOut(**row) for row in rows],
         total=stats["total"],
+        filtered_total=filtered_total,
         stats=stats,
     )
