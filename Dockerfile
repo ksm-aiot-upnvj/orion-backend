@@ -1,11 +1,10 @@
 # --- STAGE 1: BUILDER STAGE (uv package installation) ---
 FROM python:3.14-slim AS builder
 
-ENV UV_SYSTEM_PYTHON=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /build
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc \
@@ -29,7 +28,7 @@ ENV APP_HOME=/app \
 
 WORKDIR ${APP_HOME}
 
-COPY --from=builder /build/.venv /app/.venv
+COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY . .

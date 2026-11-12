@@ -1,6 +1,18 @@
 #!/bin/sh
 set -e
 
+# Compose/runtime environments can override the image PATH. Keep the project venv
+# first so migrations and the FastAPI CLI use the dependencies installed in it.
+export PATH="/app/.venv/bin:$PATH"
+
+# A bind-mounted uploads directory can hide the image's ownership. Fix it while
+# privileged, then re-exec this script as the dedicated unprivileged app user.
+if [ "$(id -u)" -eq 0 ]; then
+  mkdir -p /app/uploads
+  chown -R orion:orion /app/uploads
+  exec setpriv --reuid=orion --regid=orion --init-groups "$0" "$@"
+fi
+
 echo "Waiting for PostgreSQL database..."
 until python - <<EOF
 import asyncpg, asyncio, os
