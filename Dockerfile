@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 FROM python:3.14-slim AS runner
 
 ENV APP_HOME=/app \
+    HOME=/home/orion \
     PORT=8000 \
     HOST=0.0.0.0 \
     PYTHONPATH=/app \
@@ -37,8 +38,8 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh \
     && groupadd --system --gid 10001 orion \
     && useradd --system --uid 10001 --gid orion --no-create-home orion \
-    && mkdir -p /app/uploads \
-    && chown -R orion:orion /app/uploads
+    && mkdir -p /app/uploads /home/orion \
+    && chown -R orion:orion /app/uploads /home/orion
 
 # The entrypoint starts as root only to fix ownership of an existing uploads volume, then drops to
 # the unprivileged "orion" user (setpriv) before running migrations and the app.

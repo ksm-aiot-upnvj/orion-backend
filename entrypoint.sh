@@ -4,6 +4,7 @@ set -e
 # Compose/runtime environments can override the image PATH. Keep the project venv
 # first so migrations and the FastAPI CLI use the dependencies installed in it.
 export PATH="/app/.venv/bin:$PATH"
+export HOME=/home/orion
 
 # A bind-mounted uploads directory can hide the image's ownership. Fix it while
 # privileged, then re-exec this script as the dedicated unprivileged app user.
